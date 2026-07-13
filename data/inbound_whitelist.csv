@@ -1,0 +1,4 @@
+phone,first_name,last_name,street,house_number,city,registered_branch,support_score,campaign_id,priority
+0501234567,רחל,לוי,הרצל,12,פתח תקווה,פתח תקווה,0.62,primaries-2026,1
+0502345678,אברהם,כהן,ז׳בוטינסקי,45,פתח תקווה,פתח תקווה,0.78,primaries-2026,1
+0505678901,שרה,גולדברג,הנדיב,67,רמת השרון,פתח תקווה,0.68,primaries-2026,1

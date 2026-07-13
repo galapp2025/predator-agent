@@ -1,192 +1,318 @@
-"""
-Predator Agent — Dual-LLM + DISC + Personas + Tactics + State Machine
-"""
+"""Predator Agent — Dual-LLM Orchestrator"""
 
-import asyncio
+from __future__ import annotations
+
 import logging
-import random
-from typing import List, Optional, Dict
+import os
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
-from livekit.agents import Agent, RunContext, function_tool
-from src.llm.slow_llm import PsychologicalAnalyzer
-from src.llm.prompt_builder import build_full_prompt
-from src.profile.disc_classifier import classify_disc
-from src.personas.persona_base import DiscType, get_persona, get_style_instructions
-from src.persuasion.tactics import get_tactic_instructions, get_tactic_by_profile
-from src.persuasion.resistance_meter import measure_resistance
-from src.state_machine.states import Phase, ConversationState
+from ..enrichment.voter_context import VoterContext, VoterContextBuilder
+from ..llm.prompt_builder import PromptBuilder
+from ..llm.slow_llm import PsychologicalAnalysis, SlowLLMAnalyzer
+from ..personas.persona_base import get_persona, get_tts_params
+from ..persuasion.resistance_meter import measure_resistance
+from ..persuasion.tactics import get_tactic_for_moment
+from ..profile.disc_classifier import classify
+from ..state_machine.states import ConversationState, can_transition
+from ..battle_mode import BattleMode
 
-logger = logging.getLogger("predator.agent")
+logger = logging.getLogger("predator-agent")
 
+LLM_HEBREW_PARAMS = {
+    "model": "gpt-4.1-mini",
+    "temperature": 0.82,
+    "max_tokens": 150,
+    "top_p": 0.92,
+}
 
-@function_tool
-async def update_voter_profile(
-    context: RunContext,
-    voter_id: str = "",
-    support_level: int = 0,
-    key_issues: str = "",
-    disc_profile: str = ""
-):
-    logger.info(f"📊 Voter: support={support_level}, DISC={disc_profile}, issues={key_issues}")
-    return {"updated": True}
-
-
-@function_tool
-async def commit_voter(
-    context: RunContext,
-    voter_id: str = "",
-    commitment_type: str = "",
-    details: str = ""
-):
-    logger.info(f"🔒 COMMIT: {commitment_type} — {details}")
-    return {"confirmed": True, "type": commitment_type}
+# Timeouts (שניות) — מבחן שקט + גבולות תגובה
+SILENCE_TIMEOUT_SEC = 4.0
+SILENCE_PROBE = "בוחן? אתה שם?"
+SLOW_LLM_TIMEOUT_SEC = 8.0
+TURN_BUDGET_SEC = 12.0
 
 
-@function_tool
-async def escalate_to_human(
-    context: RunContext,
-    voter_id: str = "",
-    reason: str = "",
-    summary: str = ""
-):
-    logger.warning(f"🟡 HANDOFF: {reason}")
-    return {"handoff": True}
+@dataclass
+class CallSession:
+    session_id: str
+    voter_context: Optional[VoterContext] = None
+    conversation_history: List[Dict[str, str]] = field(default_factory=list)
+    current_state: ConversationState = ConversationState.OPENING
+    current_persona: str = "S"
+    current_resistance: str = "medium"
+    current_tactic: Optional[str] = None
+    exchange_count: int = 0
+    last_slow_analysis: Optional[PsychologicalAnalysis] = None
+    support_score: float = 0.5
+
+    def transition_to(self, new_state: ConversationState) -> bool:
+        if can_transition(self.current_state, new_state):
+            self.current_state = new_state
+            return True
+        return False
+
+    def get_last_voter_message(self) -> Optional[str]:
+        for msg in reversed(self.conversation_history):
+            if msg["role"] == "user":
+                return msg["content"]
+        return None
 
 
-class PredatorAgent(Agent):
-    def __init__(self, anthropic_key: str) -> None:
-        self.analyzer = PsychologicalAnalyzer(api_key=anthropic_key)
-        self.state = ConversationState()
+class PredatorAgent:
+    def __init__(
+        self,
+        anthropic_api_key: Optional[str] = None,
+        openai_api_key: Optional[str] = None,
+    ):
+        self.slow_llm = SlowLLMAnalyzer(api_key=anthropic_api_key)
+        self.prompt_builder = PromptBuilder()
+        self.voter_builder = VoterContextBuilder()
+        self.active_sessions: Dict[str, CallSession] = {}
+        self.battle_modes: Dict[str, BattleMode] = {}
+        self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+        self._openai_client = None
 
-        self.transcript_buffer: List[str] = []
-        self.analysis: Optional[Dict] = None
-        self.analysis_task: Optional[asyncio.Task] = None
-        self.exchange_count = 0
-        self.current_disc: Optional[DiscType] = None
-        self.current_resistance: float = 0.5
-        self.prev_resistance: float = 0.5
+    @property
+    def openai_client(self):
+        if self._openai_client is None:
+            try:
+                from openai import AsyncOpenAI
 
-        super().__init__(
-            instructions=build_full_prompt(),
-            tools=[update_voter_profile, commit_voter, escalate_to_human],
+                self._openai_client = AsyncOpenAI(api_key=self.openai_api_key)
+            except Exception:
+                return None
+        return self._openai_client
+
+    def create_session(
+        self,
+        session_id: str,
+        voter_context: Optional[VoterContext] = None,
+    ) -> CallSession:
+        session = CallSession(
+            session_id=session_id,
+            voter_context=voter_context,
+            current_persona=self._initial_persona(voter_context),
+            support_score=voter_context.support_score if voter_context else 0.5,
+        )
+        if voter_context and voter_context.support_score > 0.7:
+            session.current_state = ConversationState.GOTV
+        self.active_sessions[session_id] = session
+        self.battle_modes[session_id] = BattleMode()
+        return session
+
+    def _initial_persona(self, ctx: Optional[VoterContext]) -> str:
+        if not ctx:
+            return "S"
+        if ctx.gender == "female" and ctx.age_group == "65+":
+            return "S"
+        if ctx.gender == "male" and ctx.age_group in ("25-45", "45-65"):
+            return "D"
+        if ctx.age_group == "25-45":
+            return "I"
+        if ctx.ethnic_hint == "russian":
+            return "D"
+        if ctx.ethnic_hint == "ethiopian":
+            return "S"
+        return "S"
+
+    async def process_voter_turn(self, session_id: str, voter_text: str) -> dict:
+        session = self.active_sessions.get(session_id)
+        if not session:
+            return {"error": "session not found"}
+
+        resistance = measure_resistance(voter_text)
+        session.current_resistance = resistance.level
+        battle = self.battle_modes.setdefault(session_id, BattleMode())
+        battle_hit = battle.evaluate(
+            voter_text,
+            resistance_level=resistance.level,
+        )
+        disc = classify(voter_text)
+        session.conversation_history.append({"role": "user", "content": voter_text})
+        session.exchange_count += 1
+
+        if session.exchange_count % 2 == 0:
+            await self._run_slow_analysis(session)
+
+        self._maybe_transition(session, resistance.level, disc.primary)
+
+        tactic = get_tactic_for_moment(
+            state=session.current_state.value,
+            resistance=resistance.level,
+            support_score=session.support_score,
+        )
+        if tactic:
+            session.current_tactic = tactic.name
+
+        voter_ctx_str = None
+        if session.voter_context:
+            voter_ctx_str = self.voter_builder.to_prompt_context(session.voter_context)
+
+        system_prompt = self.prompt_builder.build(
+            persona_disc=session.current_persona,
+            voter_context=voter_ctx_str,
+            state=session.current_state.value,
+            resistance_level=resistance.level,
+            best_tactic=tactic.name if tactic else None,
+            support_score=session.support_score,
+            exchange_number=session.exchange_count,
         )
 
-    async def on_enter(self) -> None:
-        self.exchange_count = 0
-        self.transcript_buffer = []
-        self.state = ConversationState()
-
-        opener = random.choice([
-            "בוקר טוב! שמח שהצלחתי לתפוס.",
-            "צהריים טובים. מקווה שהיום זורם.",
-            "ערב טוב. סליחה על השעה.",
-        ])
-        await self.session.generate_reply(
-            instructions=f"{opener} שאל אם זה זמן טוב לדבר. קצר."
+        tts_params = get_tts_params(session.current_persona)
+        tts_params["speed"] = self._calc_tts_speed(
+            tts_params["speed"],
+            session.current_state,
+            session.last_slow_analysis,
         )
 
-    async def on_user_speech_ended(self, text: str) -> None:
-        self.transcript_buffer.append(f"בוחר: {text}")
-        self.exchange_count += 1
+        return {
+            "system_prompt": system_prompt,
+            "tts_params": tts_params,
+            "llm_params": dict(LLM_HEBREW_PARAMS),
+            "timeouts": {
+                "silence_sec": SILENCE_TIMEOUT_SEC,
+                "slow_llm_sec": SLOW_LLM_TIMEOUT_SEC,
+                "turn_budget_sec": TURN_BUDGET_SEC,
+            },
+            "state": session.current_state.value,
+            "persona": session.current_persona,
+            "resistance": resistance.level,
+            "tactic": tactic.name if tactic else None,
+            "disc": disc.primary,
+            "battle": battle_hit,
+            "battle_overlay": battle.prompt_overlay() if battle_hit else "",
+        }
 
-        # 1. מדידת התנגדות מיידית
-        self.prev_resistance = self.current_resistance
-        self.current_resistance = measure_resistance(text)
-        logger.info(
-            f"💬 #{self.exchange_count}: resistance={self.current_resistance:.2f}, "
-            f"phase={self.state.current.value}"
+    def handle_silence(self, session_id: str, silence_seconds: float) -> Optional[dict]:
+        """מבחן שקט (מתקפה 20): אחרי 4+ שניות — בדיקת נוכחות."""
+        session = self.active_sessions.get(session_id)
+        if not session:
+            return {"error": "session not found"}
+        if silence_seconds < SILENCE_TIMEOUT_SEC:
+            return None
+
+        battle = self.battle_modes.setdefault(session_id, BattleMode())
+        battle_hit = battle.evaluate("", silence_seconds=silence_seconds)
+        tts_params = get_tts_params(session.current_persona)
+        tts_params["speed"] = self._calc_tts_speed(
+            tts_params["speed"],
+            session.current_state,
+            session.last_slow_analysis,
         )
+        return {
+            "reply": (battle_hit or {}).get("reply", SILENCE_PROBE),
+            "silence_probe": True,
+            "battle": battle_hit,
+            "silence_seconds": silence_seconds,
+            "tts_params": tts_params,
+            "llm_params": dict(LLM_HEBREW_PARAMS),
+            "state": session.current_state.value,
+            "persona": session.current_persona,
+        }
 
-        # 2. DISC מהיר — מקומי, בלי API
-        disc, scores = classify_disc(text)
-        total = sum(scores.values())
-        if total >= 2:
-            disc_type = DiscType(disc)
-            if disc_type != self.current_disc:
-                self.current_disc = disc_type
-                persona = get_persona(disc_type)
-                logger.info(f"🎭 DISC → {disc} ({persona.name}), scores={scores}")
-
-        # 3. מעבר מצב
-        if self.current_resistance > 0.8:
-            self.state.transition("resistant")
-        elif self.current_resistance < 0.2:
-            self.state.transition("convinced")
-        elif self.current_resistance > self.prev_resistance + 0.3:
-            self.state.transition("hostile")
-        else:
-            self.state.transition("neutral")
-
-        # 4. בדיקות קריטיות
-        if self.state.should_handoff():
-            logger.warning("🟡 HANDOFF TRIGGERED")
-            await self.session.generate_reply(
-                instructions="התנצל והצע להעביר לנציג אנושי. קרא ל-escalate_to_human."
-            )
-            return
-
-        if self.state.should_release():
-            logger.info("🔚 Release — 3 attempts, no commit")
-            await self.session.generate_reply(
-                instructions="שחרר בכבוד. 'סבבה, תודה על הזמן. אם תשנה את דעתך — אנחנו פה.'"
-            )
-            return
-
-        # 5. ניתוח קלוד — כל 2 חילופים
-        if self.exchange_count >= 2 and len(self.transcript_buffer) >= 4:
-            if not self.analysis_task or self.analysis_task.done():
-                transcript = "\n".join(self.transcript_buffer[-12:])
-                self.analysis_task = asyncio.create_task(
-                    self._run_analysis(transcript)
-                )
-
-        # 6. עדכון System Prompt דינמי
-        self._update_dynamic_prompt()
-
-    def _update_dynamic_prompt(self):
-        """בונה ומעדכן System Prompt דינמי"""
-        blocks = []
-
-        # פרסונה
-        if self.current_disc:
-            persona = get_persona(self.current_disc)
-            blocks.append(get_style_instructions(persona))
-
-        # שלב
-        blocks.append(f"## 📍 שלב נוכחי: {self.state.current.value}")
-        blocks.append(self.state.phase_instructions())
-
-        # טקטיקה
-        disc_str = self.current_disc.value if self.current_disc else "S"
-        tactic = get_tactic_by_profile(disc_str, self.current_resistance)
-        blocks.append(get_tactic_instructions(tactic))
-
-        # התנגדות
-        blocks.append(f"## 📏 התנגדות נוכחית: {self.current_resistance:.2f}/1.0")
-
-        # ניתוח קלוד (אם קיים)
-        if self.analysis:
-            blocks.append(self.analyzer.build_prompt_update())
-
-        update = "\n\n".join(blocks)
-        self.session.update_instructions(
-            instructions=build_full_prompt(update)
-        )
-
-    async def _run_analysis(self, transcript: str):
+    async def _run_slow_analysis(self, session: CallSession) -> None:
         try:
-            self.analysis = await self.analyzer.analyze(transcript)
-            # Claude overrides DISC if different
-            if self.analysis:
-                claude_disc = self.analysis.get("disc_profile")
-                if claude_disc and claude_disc != (self.current_disc.value if self.current_disc else None):
-                    self.current_disc = DiscType(claude_disc)
+            voter_ctx_dict = None
+            if session.voter_context:
+                voter_ctx_dict = {
+                    "first_name": session.voter_context.first_name,
+                    "last_name": session.voter_context.last_name,
+                    "gender": session.voter_context.gender,
+                    "age_group": session.voter_context.age_group,
+                    "support_score": session.voter_context.support_score,
+                }
+            analysis = await self.slow_llm.analyze(
+                conversation_history=session.conversation_history,
+                voter_context=voter_ctx_dict,
+            )
+            if analysis:
+                session.last_slow_analysis = analysis
+                if (
+                    analysis.persona_recommendation != session.current_persona
+                    and analysis.confidence > 0.6
+                ):
+                    session.current_persona = analysis.persona_recommendation
+                    logger.info(
+                        "[%s] persona → %s",
+                        session.session_id,
+                        analysis.persona_recommendation,
+                    )
+        except Exception as e:
+            logger.error("slow analysis failed: %s", e)
 
-            self._update_dynamic_prompt()
-            logger.info(
-                f"🧠 Claude: DISC={self.analysis.get('disc_profile') if self.analysis else 'N/A'}, "
-                f"Tactic={self.analysis.get('recommended_tactic') if self.analysis else 'N/A'}"
+    def _maybe_transition(
+        self,
+        session: CallSession,
+        resistance_level: str,
+        disc_primary: str,
+    ) -> None:
+        current = session.current_state
+        if current == ConversationState.GOTV:
+            if resistance_level in ("high", "very_high"):
+                session.transition_to(ConversationState.OBJECTION_HANDLING)
+            return
+        if current == ConversationState.OPENING:
+            if resistance_level in ("high", "very_high"):
+                session.transition_to(ConversationState.DEESCALATION)
+            else:
+                session.transition_to(ConversationState.EXPLORATION)
+            return
+        if current == ConversationState.EXPLORATION:
+            if session.exchange_count >= 3:
+                session.transition_to(ConversationState.PROFILING)
+            return
+        if current == ConversationState.PROFILING:
+            if session.exchange_count >= 4:
+                session.transition_to(ConversationState.PERSUASION)
+            return
+        if current == ConversationState.PERSUASION:
+            if resistance_level in ("high", "very_high"):
+                session.transition_to(ConversationState.OBJECTION_HANDLING)
+            elif session.exchange_count >= 6 and resistance_level == "low":
+                session.transition_to(ConversationState.COMMITMENT)
+            return
+        if current == ConversationState.OBJECTION_HANDLING:
+            if resistance_level == "low":
+                session.transition_to(ConversationState.PERSUASION)
+            elif session.exchange_count >= 8:
+                session.transition_to(ConversationState.SEED_PLANTING)
+            return
+        if current == ConversationState.SEED_PLANTING:
+            if session.exchange_count >= 9:
+                session.transition_to(ConversationState.CLOSING)
+            return
+
+    def _calc_tts_speed(
+        self,
+        base_speed: float,
+        state: ConversationState,
+        slow_analysis: Optional[PsychologicalAnalysis] = None,
+    ) -> float:
+        state_modifier = {
+            ConversationState.OPENING: 1.0,
+            ConversationState.EXPLORATION: 0.97,
+            ConversationState.PROFILING: 0.95,
+            ConversationState.PERSUASION: 1.05,
+            ConversationState.COMMITMENT: 0.92,
+            ConversationState.CLOSING: 0.90,
+            ConversationState.OBJECTION_HANDLING: 0.95,
+            ConversationState.SEED_PLANTING: 0.95,
+            ConversationState.GOTV: 1.0,
+            ConversationState.DEESCALATION: 0.88,
+            ConversationState.AMPLIFICATION: 1.0,
+        }
+        speed = base_speed * state_modifier.get(state, 1.0)
+        if slow_analysis:
+            speed *= slow_analysis.suggested_pace_modifier
+        return round(max(0.80, min(1.25, speed)), 2)
+
+    def add_assistant_response(self, session_id: str, response: str) -> None:
+        session = self.active_sessions.get(session_id)
+        if session:
+            session.conversation_history.append(
+                {"role": "assistant", "content": response}
             )
 
-        except Exception as e:
-            logger.error(f"Analysis failed: {e}")
+    def get_session(self, session_id: str) -> Optional[CallSession]:
+        return self.active_sessions.get(session_id)

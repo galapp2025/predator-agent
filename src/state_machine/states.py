@@ -1,122 +1,53 @@
-"""
-State Machine — Pipecat-inspired Flow
-"""
+"""State Machine — 11 מצבי שיחה"""
+
+from __future__ import annotations
 
 from enum import Enum
-from typing import Dict
+from typing import Dict, List
 
 
-class Phase(Enum):
+class ConversationState(Enum):
     OPENING = "opening"
-    DEESCALATE = "deescalate"       # בוחר עוין/שלילי
-    EXPLORE = "explore"             # בוחר ניטרלי
-    AMPLIFY = "amplify"             # בוחר חיובי
-    PROFILE = "profile"             # מיפוי DISC
-    PERSUADE = "persuade"           # טקטיקת שכנוע
-    COMMIT = "commit"               # בוחר מוכן להתחייב
-    OBJECTION = "objection"         # התנגדות
-    SEED = "seed"                   # זרע לעתיד — שחרר בכבוד
-    CLOSE = "close"                 # סיום
-    HANDOFF = "handoff"             # העברה לנציג אנושי
+    DEESCALATION = "deescalation"
+    EXPLORATION = "exploration"
+    AMPLIFICATION = "amplification"
+    PROFILING = "profiling"
+    PERSUASION = "persuasion"
+    COMMITMENT = "commitment"
+    OBJECTION_HANDLING = "objection_handling"
+    SEED_PLANTING = "seed_planting"
+    GOTV = "gotv"
+    CLOSING = "closing"
 
 
-TRANSITIONS: Dict[Phase, Dict[str, Phase]] = {
-    Phase.OPENING: {
-        "hostile": Phase.DEESCALATE,
-        "neutral": Phase.EXPLORE,
-        "receptive": Phase.AMPLIFY,
-        "timeout": Phase.CLOSE,
-    },
-    Phase.DEESCALATE: {
-        "calm": Phase.EXPLORE,
-        "still_hostile": Phase.DEESCALATE,
-        "escalating": Phase.HANDOFF,
-    },
-    Phase.EXPLORE: {
-        "profiled": Phase.PROFILE,
-        "more_info": Phase.EXPLORE,
-        "hostile": Phase.DEESCALATE,
-    },
-    Phase.AMPLIFY: {
-        "profiled": Phase.PROFILE,
-        "ready": Phase.PERSUADE,
-    },
-    Phase.PROFILE: {
-        "ready": Phase.PERSUADE,
-        "incomplete": Phase.EXPLORE,
-    },
-    Phase.PERSUADE: {
-        "convinced": Phase.COMMIT,
-        "hesitant": Phase.PERSUADE,
-        "resistant": Phase.OBJECTION,
-    },
-    Phase.OBJECTION: {
-        "handled": Phase.PERSUADE,
-        "stuck": Phase.SEED,
-        "escalating": Phase.HANDOFF,
-    },
-    Phase.SEED: {
-        "done": Phase.CLOSE,
-    },
-    Phase.COMMIT: {
-        "confirmed": Phase.CLOSE,
-        "unconfirmed": Phase.PERSUADE,
-    },
-    Phase.CLOSE: {},
-    Phase.HANDOFF: {
-        "completed": Phase.CLOSE,
-    },
+STATE_INSTRUCTIONS: Dict[ConversationState, str] = {
+    ConversationState.OPENING: "אתה בשלב הפתיחה. (1) אשר זהות. (2) הצג את עצמך. (3) בקש 2 דקות. קצר, חם.",
+    ConversationState.DEESCALATION: "הבוחר לחוץ. האט. 'אני מבין. אין לחץ.' תן לפרוק.",
+    ConversationState.EXPLORATION: "חקור בשאלות פתוחות. 70% בוחר, 30% אתה.",
+    ConversationState.AMPLIFICATION: "הדגש את הבעיה שהוא כבר הרגיש. בלי שקר.",
+    ConversationState.PROFILING: "הבן DISC מרמזי שפה. אל תשאל ישירות.",
+    ConversationState.PERSUASION: "שכנוע לפי התנגדות. עד 3 ניסיונות.",
+    ConversationState.COMMITMENT: "ברירת אלטרנטיבה. אחרי — שתיקה 5 שניות.",
+    ConversationState.OBJECTION_HANDLING: "אמת התנגדות. שאל מה היה משנה.",
+    ConversationState.SEED_PLANTING: "רעיון אחד. בלי לחץ. יציאה מכובדת.",
+    ConversationState.GOTV: "כבר תומך — לוגיסטיקה: קלפי, שעה, הגעה.",
+    ConversationState.CLOSING: "תודה חמה. קצר. לא למכור.",
+}
+
+ALLOWED_TRANSITIONS: Dict[ConversationState, List[ConversationState]] = {
+    ConversationState.OPENING: [ConversationState.EXPLORATION, ConversationState.DEESCALATION, ConversationState.GOTV],
+    ConversationState.DEESCALATION: [ConversationState.EXPLORATION, ConversationState.CLOSING],
+    ConversationState.EXPLORATION: [ConversationState.AMPLIFICATION, ConversationState.PROFILING, ConversationState.PERSUASION],
+    ConversationState.AMPLIFICATION: [ConversationState.PERSUASION, ConversationState.PROFILING],
+    ConversationState.PROFILING: [ConversationState.PERSUASION, ConversationState.OBJECTION_HANDLING],
+    ConversationState.PERSUASION: [ConversationState.COMMITMENT, ConversationState.OBJECTION_HANDLING, ConversationState.SEED_PLANTING],
+    ConversationState.OBJECTION_HANDLING: [ConversationState.PERSUASION, ConversationState.SEED_PLANTING, ConversationState.CLOSING],
+    ConversationState.SEED_PLANTING: [ConversationState.CLOSING, ConversationState.PERSUASION],
+    ConversationState.COMMITMENT: [ConversationState.CLOSING],
+    ConversationState.GOTV: [ConversationState.CLOSING, ConversationState.OBJECTION_HANDLING],
+    ConversationState.CLOSING: [],
 }
 
 
-class ConversationState:
-    def __init__(self):
-        self.current: Phase = Phase.OPENING
-        self.history: list[Phase] = [Phase.OPENING]
-        self.attempts: dict[Phase, int] = {}
-        self.resistance_history: list[float] = []
-
-    def transition(self, outcome: str) -> Phase:
-        possible = TRANSITIONS.get(self.current, {})
-
-        if outcome in possible:
-            next_phase = possible[outcome]
-        else:
-            next_phase = self.current
-
-        self.history.append(next_phase)
-        self.current = next_phase
-        self.attempts[next_phase] = self.attempts.get(next_phase, 0) + 1
-
-        return next_phase
-
-    def should_handoff(self) -> bool:
-        """האם להעביר לנציג אנושי?"""
-        return (
-            self.attempts.get(Phase.OBJECTION, 0) >= 3 or
-            self.attempts.get(Phase.DEESCALATE, 0) >= 4
-        )
-
-    def should_release(self) -> bool:
-        """האם לשחרר בכבוד?"""
-        return (
-            self.attempts.get(Phase.PERSUADE, 0) >= 3 and
-            Phase.COMMIT not in self.history
-        )
-
-    def phase_instructions(self) -> str:
-        """הנחיות ל-LLM לפי שלב נוכחי"""
-        instructions = {
-            Phase.OPENING: "פתח בשיחה. בדוק מצב רוח. אל תמהר.",
-            Phase.DEESCALATE: "הבוחר שלילי/עוין. הרגע. הסכם. 'אתה צודק, ו...'. אל תעלה הילוך.",
-            Phase.EXPLORE: "זהה נושאים חשובים. תן לבוחר לדבר. הקשיב.",
-            Phase.AMPLIFY: "הבוחר חיובי. חזק. הגבר אנרגיה. שתף סיפור חיובי.",
-            Phase.PROFILE: "אסוף מידע למיפוי אישיותי. שאל שאלות ערכיות.",
-            Phase.PERSUADE: "השתמש בטקטיקת השכנוע. הוביל לשינוי עמדה. דבר על מה הבוחר יפסיד.",
-            Phase.COMMIT: "הבוחר מוכן. אשר, חזק, קבע צעד הבא. 'אפשר לסמן אותך?' 'מתי נוח — בוקר או ערב?'",
-            Phase.OBJECTION: "התנגדות. הסכם → שאל → הצע אלטרנטיבה. אל תתווכח. 3 קלפים: הדדיות → אובדן → דלת-בפנים.",
-            Phase.SEED: "שתול זרע לעתיד. סיים בחיוב. 'אם תשנה את דעתך — דבר איתי.'",
-            Phase.CLOSE: "סיים בחום. קצר. 'תודה על הזמן. יום טוב.'",
-            Phase.HANDOFF: "הצע העברה לנציג אנושי. אל תתעקש. 'תן לי לחבר אותך למישהו שיכול לעזור יותר טוב.'",
-        }
-        return instructions.get(self.current, "")
+def can_transition(from_state: ConversationState, to_state: ConversationState) -> bool:
+    return to_state in ALLOWED_TRANSITIONS.get(from_state, [])

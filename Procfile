@@ -1,1 +1,1 @@
-web: PYTHONPATH=. python src/main.py
+web: PYTHONPATH=. python src/livekit_worker.py start

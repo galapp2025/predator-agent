@@ -1,0 +1,62 @@
+[
+  {
+    "lead_id": "001",
+    "phone": "0501234567",
+    "start_time": "2026-07-12T19:10:15.075609",
+    "end_time": "2026-07-12T19:10:15.075777",
+    "duration": 0,
+    "outcome": "no_answer",
+    "persona": "",
+    "disc": "",
+    "support": 0,
+    "notes": ""
+  },
+  {
+    "lead_id": "002",
+    "phone": "0502345678",
+    "start_time": "2026-07-12T19:10:15.075928",
+    "end_time": "2026-07-12T19:10:15.076082",
+    "duration": 0,
+    "outcome": "no_answer",
+    "persona": "",
+    "disc": "",
+    "support": 0,
+    "notes": ""
+  },
+  {
+    "lead_id": "004",
+    "phone": "0504567890",
+    "start_time": "2026-07-12T19:10:15.076125",
+    "end_time": "2026-07-12T19:10:15.076156",
+    "duration": 0,
+    "outcome": "no_answer",
+    "persona": "",
+    "disc": "",
+    "support": 0,
+    "notes": ""
+  },
+  {
+    "lead_id": "003",
+    "phone": "0503456789",
+    "start_time": "2026-07-12T19:10:15.076175",
+    "end_time": "2026-07-12T19:10:15.076191",
+    "duration": 0,
+    "outcome": "no_answer",
+    "persona": "",
+    "disc": "",
+    "support": 0,
+    "notes": ""
+  },
+  {
+    "lead_id": "005",
+    "phone": "0505678901",
+    "start_time": "2026-07-12T19:10:15.076204",
+    "end_time": "2026-07-12T19:10:15.076218",
+    "duration": 0,
+    "outcome": "no_answer",
+    "persona": "",
+    "disc": "",
+    "support": 0,
+    "notes": ""
+  }
+]
