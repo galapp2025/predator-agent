@@ -684,7 +684,7 @@ class VoiceSession:
 
         llm = FastLLM(
             temperature=0.65 if investor else 0.7,
-            max_tokens=160 if investor else 64,
+            max_tokens=180 if investor else 64,
             top_p=0.9,
             groq_model=GROQ_VOICE_MODEL,
         )
