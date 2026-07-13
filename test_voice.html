@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🎙 Predator Agent — בדיקה קולית</title>
+<style>
+:root { --bg:#0a0a0f; --panel:#141420; --border:#252540; --text:#e0e0f0; --dim:#8080a0; --accent:#e63946; --accent2:#ff8800; --green:#00cc66; --blue:#4488ff; --purple:#8844ff; --gold:#ffbb33; --red:#ff4444; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; display:flex; justify-content:center; align-items:flex-start; min-height:100vh; padding:16px; }
+.container { width:100%; max-width:750px; display:flex; flex-direction:column; gap:12px; }
+h1 { text-align:center; font-size:1.5em; color:var(--accent); letter-spacing:1px; }
+.subtitle { text-align:center; color:var(--dim); font-size:0.8em; margin-bottom:4px; }
+.conn-bar { display:flex; align-items:center; gap:8px; padding:10px 16px; border-radius:10px; background:var(--panel); border:1px solid var(--border); flex-wrap:wrap; justify-content:center; font-size:0.82em; min-height:42px; transition:border-color .3s,background .3s; }
+.conn-bar .status-msg { color:var(--dim); font-weight:500; }
+.conn-bar.disconnected { border-color:var(--red); background:#1a0a0a; }
+.conn-bar.connected { border-color:var(--green); background:#0a1a0a; }
+.conn-bar .reconnect-btn { background:var(--blue); color:white; border:none; border-radius:6px; padding:4px 14px; cursor:pointer; font-size:0.8em; font-family:inherit; margin-right:auto; }
+.conn-bar .reconnect-btn:hover { opacity:0.85; }
+.status-dots { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; padding:6px 0; }
+.status-dot { display:flex; align-items:center; gap:5px; font-size:0.78em; padding:3px 10px; border-radius:16px; background:var(--panel); border:1px solid var(--border); }
+.dot { width:8px; height:8px; border-radius:50%; transition:all .3s; }
+.dot.off { background:#444; }
+.dot.on { background:var(--green); box-shadow:0 0 6px var(--green); }
+.dot.warn { background:var(--gold); box-shadow:0 0 6px var(--gold); }
+.dot.err { background:var(--red); box-shadow:0 0 6px var(--red); }
+.pipe-steps { display:flex; justify-content:center; gap:4px; flex-wrap:wrap; font-size:0.7em; }
+.pipe-step { padding:3px 8px; border-radius:4px; background:var(--panel); border:1px solid var(--border); color:var(--dim); transition:all .25s; }
+.pipe-step.active { border-color:var(--accent2); color:var(--accent2); background:#1a1000; }
+.error-banner { display:none; padding:10px 14px; border-radius:8px; background:#1a0505; border:1px solid var(--red); color:var(--red); font-size:0.82em; text-align:center; }
+.error-banner.show { display:block; }
+.error-banner .dismiss-btn { background:none; border:1px solid var(--red); color:var(--red); border-radius:4px; padding:2px 10px; margin-right:10px; cursor:pointer; font-size:0.85em; font-family:inherit; }
+.panel { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; }
+.panel-title { font-size:0.7em; color:var(--dim); text-transform:uppercase; letter-spacing:2px; margin-bottom:10px; }
+.transcript { max-height:38vh; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:4px 0; min-height:100px; }
+.transcript::-webkit-scrollbar { width:4px; }
+.transcript::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+.msg { max-width:85%; padding:8px 12px; border-radius:8px; font-size:0.88em; line-height:1.4; animation:fadeIn .3s ease; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:translateY(0); } }
+.msg.voter { align-self:flex-start; background:#1a1a30; border:1px solid #2a2a45; }
+.msg.agent { align-self:flex-end; background:#1a0a1a; border:1px solid #3a1a3a; }
+.msg .label { font-size:0.7em; color:var(--dim); margin-bottom:3px; }
+.msg .meta { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; font-size:0.68em; color:var(--dim); }
+.msg .meta span { padding:1px 6px; border-radius:3px; background:rgba(255,255,255,0.05); }
+.log-panel { max-height:80px; overflow-y:auto; font-size:0.72em; color:var(--dim); line-height:1.5; font-family:'Fira Code',Consolas,monospace; }
+.log-panel::-webkit-scrollbar { width:3px; }
+.log-panel::-webkit-scrollbar-thumb { background:var(--border); }
+.log-entry.warn { color:var(--gold); }
+.log-entry.error { color:var(--red); }
+.log-entry.info { color:var(--blue); }
+.pipeline-info { font-size:0.72em; color:var(--dim); line-height:1.8; word-break:break-all; }
+.pipeline-info b { color:var(--text); }
+.btn-row { display:flex; gap:10px; justify-content:center; flex-wrap:wrap; }
+.btn { padding:12px 28px; border:none; border-radius:10px; font-size:1em; font-weight:600; font-family:inherit; cursor:pointer; transition:all .2s; }
+.btn:disabled { opacity:0.35; cursor:not-allowed; }
+.btn-start { background:var(--green); color:#000; }
+.btn-start:hover:not(:disabled) { background:#00dd77; transform:scale(1.03); }
+.btn-stop { background:var(--accent); color:#fff; }
+.btn-stop:hover:not(:disabled) { background:#ff5555; transform:scale(1.03); }
+.btn-reset { background:var(--panel); color:var(--dim); border:1px solid var(--border); }
+.btn-reset:hover:not(:disabled) { border-color:var(--dim); }
+.live-indicator { display:inline-flex; align-items:center; gap:6px; font-size:0.78em; color:var(--dim); }
+.live-dot { width:10px; height:10px; border-radius:50%; background:#444; transition:background .3s; }
+.live-indicator.active .live-dot { background:var(--red); animation:pulse 1s infinite; }
+@keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+.live-indicator.active { color:var(--red); }
+@media (max-width:500px) { body { padding:8px; } .transcript { max-height:28vh; } .btn { padding:10px 20px; font-size:0.9em; } }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🎙 Predator Agent — בדיקה קולית</h1>
+  <div class="subtitle">DISC ← State ← Resistance ← Tactic ← TTS</div>
+  <div id="connBar" class="conn-bar disconnected">
+    <span class="status-msg" id="connMsg">⏳ ממתין לחיבור...</span>
+    <button class="reconnect-btn" id="reconnectBtn" style="display:none;" onclick="reconnect()">🔄 נסה שוב</button>
+  </div>
+  <div class="status-dots">
+    <div class="status-dot"><span class="dot off" id="dot-ws"></span> WS</div>
+    <div class="status-dot"><span class="dot off" id="dot-mic"></span> 🎤</div>
+    <div class="status-dot"><span class="dot off" id="dot-stt"></span> 📋</div>
+    <div class="status-dot"><span class="dot off" id="dot-llm"></span> 🧠</div>
+    <div class="status-dot"><span class="dot off" id="dot-tts"></span> 🔈</div>
+    <div class="live-indicator" id="liveIndicator"><span class="live-dot"></span> LIVE</div>
+  </div>
+  <div class="pipe-steps">
+    <span class="pipe-step" data-step="mic">🎤</span><span style="color:var(--dim)">→</span>
+    <span class="pipe-step" data-step="stt">📋</span><span style="color:var(--dim)">→</span>
+    <span class="pipe-step" data-step="disc">🧩</span><span style="color:var(--dim)">→</span>
+    <span class="pipe-step" data-step="state">📊</span><span style="color:var(--dim)">→</span>
+    <span class="pipe-step" data-step="tactic">🎯</span><span style="color:var(--dim)">→</span>
+    <span class="pipe-step" data-step="llm">🧠</span><span style="color:var(--dim)">→</span>
+    <span class="pipe-step" data-step="tts">🔈</span><span style="color:var(--dim)">→</span>
+    <span class="pipe-step" data-step="spk">🔊</span>
+  </div>
+  <div class="error-banner" id="errorBanner">
+    <span id="errorText"></span>
+    <button class="dismiss-btn" onclick="dismissError()">✕</button>
+  </div>
+  <div class="panel">
+    <div class="panel-title">💬 תמליל שיחה</div>
+    <div class="transcript" id="transcript">
+      <div style="text-align:center;color:var(--dim);padding:20px;font-size:0.85em;">
+        לחץ <b style="color:var(--green)">התחל שיחה</b> ← דבר בעברית ← הסוכן יענה בקול<br>
+        <small style="font-size:0.7em;">WebSocket → Deepgram → DISC → State → Groq → Cartesia</small>
+      </div>
+    </div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">🔍 צינור (Pipeline)</div>
+    <div class="pipeline-info" id="pipelineInfo">ממתין לשיחה...</div>
+  </div>
+  <div class="panel">
+    <div class="panel-title">📝 לוג</div>
+    <div class="log-panel" id="logPanel"></div>
+  </div>
+  <div class="btn-row">
+    <button class="btn btn-start" id="btnStart" onclick="startCall()">🎙 התחל שיחה</button>
+    <button class="btn btn-stop" id="btnStop" onclick="endCall()" disabled>⏹ סיים שיחה</button>
+    <button class="btn btn-reset" onclick="resetCall()">🔄 איפוס</button>
+  </div>
+  <div style="text-align:center;font-size:0.65em;color:var(--dim);padding:4px;">Ctrl+Enter — התחל &nbsp;|&nbsp; Esc — סיים</div>
+</div>
+<script>
+// ═══════════════════════════════════════════════════════════
+// Predator Agent — Voice Test Client v2
+// ═══════════════════════════════════════════════════════════
+const WS_URL = (() => { if (location.protocol === 'file:') return 'ws://localhost:8765/ws'; const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'; return `${proto}//${location.host}${location.port ? ':'+location.port : ''}/ws`; })();
+const SAMPLE_RATE = 16000, CHUNK_SIZE = 4096, MAX_RECONNECT = 5;
+let ws = null, isCallActive = false, stream = null, audioCtx = null, processor = null, reconnectAttempts = 0;
+
+const connBar = document.getElementById('connBar');
+const connMsg = document.getElementById('connMsg');
+const reconnectBtn = document.getElementById('reconnectBtn');
+const errorBanner = document.getElementById('errorBanner');
+const errorText = document.getElementById('errorText');
+const transcriptEl = document.getElementById('transcript');
+const pipelineInfo = document.getElementById('pipelineInfo');
+const logPanel = document.getElementById('logPanel');
+const liveIndicator = document.getElementById('liveIndicator');
+const btnStart = document.getElementById('btnStart');
+const btnStop = document.getElementById('btnStop');
+
+function log(level, msg) {
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${level}`;
+  const now = new Date();
+  entry.textContent = `[${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}] ${msg}`;
+  logPanel.appendChild(entry);
+  logPanel.scrollTop = logPanel.scrollHeight;
+}
+
+function setConnectionState(state, msg) {
+  connBar.classList.remove('connected', 'disconnected');
+  connMsg.textContent = msg || '';
+  if (state === 'connected') { connBar.classList.add('connected'); reconnectBtn.style.display = 'none'; reconnectAttempts = 0; }
+  else if (state === 'connecting') { connBar.classList.add('disconnected'); reconnectBtn.style.display = 'none'; }
+  else { connBar.classList.add('disconnected'); reconnectBtn.style.display = reconnectAttempts < MAX_RECONNECT ? 'inline-block' : 'inline-block'; reconnectBtn.textContent = reconnectAttempts < MAX_RECONNECT ? `🔄 נסה שוב (${reconnectAttempts}/${MAX_RECONNECT})` : '🚫 מקסימום נסיונות'; }
+}
+
+function showError(msg) { errorText.textContent = msg; errorBanner.classList.add('show'); log('error', msg); }
+function dismissError() { errorBanner.classList.remove('show'); }
+function setDot(name, state) { const el = document.getElementById(`dot-${name}`); if (el) el.className = `dot ${state}`; }
+function highlightStep(step) { document.querySelectorAll('.pipe-step').forEach(el => el.classList.remove('active')); const s = document.querySelector(`.pipe-step[data-step="${step}"]`); if (s) s.classList.add('active'); }
+
+// ── WebSocket ──
+async function connectServer() {
+  setConnectionState('connecting', '⏳ מתחבר לשרת...');
+  setDot('ws', 'warn');
+  return new Promise((resolve, reject) => {
+    try { ws = new WebSocket(WS_URL); } catch (e) { setConnectionState('disconnected', '❌ לא ניתן ליצור חיבור'); setDot('ws', 'err'); return reject(e); }
+    const t = setTimeout(() => { if (ws.readyState !== WebSocket.OPEN) { setConnectionState('disconnected', '❌ timeout'); ws.close(); setDot('ws', 'err'); reject(new Error('Timeout')); } }, 5000);
+    ws.onopen = () => { clearTimeout(t); setConnectionState('connected', '✅ מחובר ל-Predator'); setDot('ws', 'on'); log('info', 'WS connected'); resolve(); };
+    ws.onclose = (e) => { clearTimeout(t); setDot('ws', 'off'); if (isCallActive) { setConnectionState('disconnected', `⚠️ נותק (${e.code})`); log('warn', `WS closed: ${e.code}`); isCallActive = false; btnStop.disabled = true; btnStart.disabled = false; liveIndicator.classList.remove('active'); stopMicrophone(); } };
+    ws.onerror = () => { clearTimeout(t); log('error', 'WS error'); };
+    ws.onmessage = async (e) => { try { await handleServerMessage(JSON.parse(e.data)); } catch (err) { log('error', `parse: ${err.message}`); } };
+  });
+}
+
+async function reconnect() {
+  reconnectAttempts++;
+  await endCall(false);
+  try { await connectServer(); await startMicrophone(); isCallActive = true; btnStop.disabled = false; btnStart.disabled = true; liveIndicator.classList.add('active'); setConnectionState('connected', '✅ מחובר מחדש'); log('info', 'Reconnected'); }
+  catch (err) { log('error', `Reconnect: ${err.message}`); showError(`חיבור נכשל: ${err.message}`); }
+}
+
+// ── Server messages ──
+async function handleServerMessage(data) {
+  if (data.type === 'session_started') {
+    setDot('stt', 'on'); setDot('llm', 'on'); setDot('tts', 'on');
+    setConnectionState('connected', `✅ ${data.persona_name} | ${(data.support_score*100).toFixed(0)}%`);
+    log('info', `Session: ${data.persona_name}`);
+    logToTranscript('system', `🎭 ${data.persona_name} | 📊 ${(data.support_score*100).toFixed(0)}%`);
+  } else if (data.type === 'agent_response') {
+    highlightStep('spk'); setDot('llm', 'on'); setDot('tts', 'on');
+    logToTranscript('agent', data.text, { state: data.state, resistance: data.resistance, persona: data.persona_name, tactic: data.tactic, tts: data.tts_speed, prompt: data.prompt_chars });
+    updatePipelineInfo(data);
+    if (data.audio) await playAudio(data.audio);
+  } else if (data.type !== 'pong') { log('info', `Unknown: ${data.type}`); }
+}
+
+// ── Microphone ──
+async function startMicrophone() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount:1, sampleRate:SAMPLE_RATE, echoCancellation:true, noiseSuppression:true } });
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)({ sampleRate:SAMPLE_RATE });
+    const source = audioCtx.createMediaStreamSource(stream);
+    processor = audioCtx.createScriptProcessor(CHUNK_SIZE, 1, 1);
+    processor.onaudioprocess = (e) => { if (!isCallActive || !ws || ws.readyState !== WebSocket.OPEN) return; const input = e.inputBuffer.getChannelData(0); const int16 = new Int16Array(input.length); for (let i=0; i<input.length; i++) int16[i] = Math.max(-32768, Math.min(32767, Math.round(input[i]*32767))); ws.send(int16.buffer); highlightStep('mic'); };
+    source.connect(processor); processor.connect(audioCtx.destination);
+    setDot('mic', 'on'); highlightStep('stt'); log('info', 'Mic active');
+  } catch (err) { log('error', `Mic: ${err.message}`); showError('לא ניתן לגשת למיקרופון. בדוק הרשאות דפדפן.'); throw err; }
+}
+
+function stopMicrophone() {
+  try { if (processor) { processor.disconnect(); processor = null; } if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; } if (audioCtx && audioCtx.state !== 'closed') { audioCtx.close().catch(() => {}); audioCtx = null; } } catch (e) {}
+  setDot('mic', 'off');
+}
+
+// ── Audio ──
+async function playAudio(b64) {
+  if (!b64) return;
+  try {
+    const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+    const ctx = new (window.AudioContext||window.webkitAudioContext)({ sampleRate:24000 });
+    const i16 = new Int16Array(bytes.buffer), f32 = new Float32Array(i16.length);
+    for (let i=0; i<i16.length; i++) f32[i] = i16[i]/32768.0;
+    const buf = ctx.createBuffer(1, f32.length, 24000); buf.getChannelData(0).set(f32);
+    const s = ctx.createBufferSource(); s.buffer = buf; s.connect(ctx.destination); s.start(0);
+    await new Promise(r => { s.onended = () => { ctx.close(); r(); }; });
+  } catch (err) { log('error', `Audio: ${err.message}`); }
+}
+
+// ── Call control ──
+async function startCall() {
+  if (isCallActive) return;
+  try { btnStart.disabled = true; dismissError(); log('info', 'Starting...'); await connectServer(); await startMicrophone(); isCallActive = true; btnStop.disabled = false; btnStart.disabled = true; liveIndicator.classList.add('active'); logToTranscript('system', '📞 שיחה התחילה — דבר עכשיו...'); log('info', 'Call started'); }
+  catch (err) { log('error', `Start: ${err.message}`); btnStart.disabled = false; setDot('ws', 'off'); showError(`השיחה לא החלה: ${err.message}. השרת פועל?`); }
+}
+
+async function endCall(sendEnd=true) {
+  if (!isCallActive && !ws) return;
+  stopMicrophone();
+  if (ws && ws.readyState === WebSocket.OPEN) { if (sendEnd) try { ws.send(JSON.stringify({type:'end_call'})); } catch (e) {} try { ws.close(); } catch (e) {} ws = null; }
+  isCallActive = false; btnStop.disabled = true; btnStart.disabled = false; liveIndicator.classList.remove('active');
+  setConnectionState('disconnected', '📴 שיחה הסתיימה');
+  ['ws','mic','stt','llm','tts'].forEach(n => setDot(n, 'off'));
+  document.querySelectorAll('.pipe-step').forEach(el => el.classList.remove('active'));
+  if (sendEnd) { logToTranscript('system', '📴 שיחה הסתיימה'); log('info', 'Call ended'); }
+}
+
+function resetCall() {
+  endCall();
+  transcriptEl.innerHTML = '<div style="text-align:center;color:var(--dim);padding:20px;font-size:0.85em;">לחץ <b style="color:var(--green)">התחל שיחה</b> ← דבר בעברית ← הסוכן יענה בקול<br><small style="font-size:0.7em;">WebSocket → Deepgram → DISC → State → Groq → Cartesia</small></div>';
+  pipelineInfo.textContent = 'ממתין לשיחה...'; logPanel.innerHTML = ''; dismissError();
+  setConnectionState('disconnected', '⏳ ממתין לחיבור...'); reconnectAttempts = 0; reconnectBtn.style.display = 'none';
+  document.querySelectorAll('.pipe-step').forEach(el => el.classList.remove('active'));
+}
+
+// ── Transcript ──
+function logToTranscript(role, text, meta) {
+  const first = transcriptEl.querySelector('div[style]'); if (first) first.remove();
+  const d = document.createElement('div');
+  d.className = `msg ${role==='agent'?'agent':role==='voter'?'voter':''}`;
+  if (role==='system') { d.style.alignSelf='center'; d.style.fontSize='0.8em'; d.style.color='var(--dim)'; d.style.background='transparent'; d.style.border='none'; }
+  let label = role==='agent'?'<div class="label">🤖 סוכן</div>':role==='voter'?'<div class="label">🧪 בוחר</div>':'';
+  let mh = ''; if (meta) mh = `<div class="meta"><span>📊 ${meta.state}</span><span>🛡 ${meta.resistance}</span><span>🎭 ${meta.persona}</span><span>🎯 ${meta.tactic||'-'}</span><span>⚡ ${meta.tts}</span></div>`;
+  d.innerHTML = label + text + mh;
+  transcriptEl.appendChild(d); transcriptEl.scrollTop = transcriptEl.scrollHeight;
+}
+
+function updatePipelineInfo(data) {
+  pipelineInfo.innerHTML = `State: <b style="color:var(--blue)">${data.state}</b> &nbsp; Resist: <b style="color:var(--accent2)">${data.resistance}</b> &nbsp; Persona: <b style="color:var(--purple)">${data.persona_name}</b> &nbsp; Tactic: <b>${data.tactic||'-'}</b> &nbsp; TTS: <b>${data.tts_speed}</b> &nbsp; Prompt: <b>${data.prompt_chars}</b> chars`;
+}
+
+document.addEventListener('keydown', (e) => { if (e.key==='Escape') { e.preventDefault(); endCall(); } if (e.key==='Enter' && e.ctrlKey) { e.preventDefault(); startCall(); } });
+</script>
+</body>
+</html>
