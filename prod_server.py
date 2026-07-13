@@ -35,6 +35,7 @@ load_dotenv()
 
 from src.agent.predator import PredatorAgent
 from src.personas.persona_base import get_persona
+from src.llm.prompt_builder import PromptBuilder
 
 # ═══════════════════════════════════════════════════════════
 # LOGGING
@@ -270,9 +271,13 @@ class PredatorEngine:
         return session_id
 
     def end_session(self, session_id: str):
-        self.agent.end_session(session_id)
+        if AGENT_MODE != "investor":
+            self.agent.end_session(session_id)
 
     async def process_text(self, session_id: str, voter_text: str) -> dict:
+        if AGENT_MODE == "investor":
+            return await self._investor_turn(voter_text)
+
         result = await self.agent.process_voter_turn(session_id, voter_text)
         state = result.get("state", "exploration")
         resistance = result.get("resistance", "low")
@@ -297,6 +302,29 @@ class PredatorEngine:
             "persona": persona_key,
             "persona_name": persona_obj.name,
             "tactic": tactic,
+            "tts_speed": tts_speed,
+            "prompt_chars": len(system_prompt),
+        }
+
+    async def _investor_turn(self, voter_text: str) -> dict:
+        """Handle investor conversation — Natalie persona."""
+        system_prompt = PromptBuilder.build_investor()
+        agent_text = await self._call_llm_chain(system_prompt, voter_text)
+        if not agent_text:
+            agent_text = "אני מצטערת, נתקלתי בתקלה טכנית. אפשר להמשיך מהנקודה שבה עצרנו?"
+
+        investor_voice = CARTESIA_VOICE_FEMALE
+        tts_speed = 1.0
+        audio_data = await self._synthesize_tts(agent_text, investor_voice, tts_speed)
+
+        return {
+            "text": agent_text,
+            "audio": audio_data,
+            "state": "investor",
+            "resistance": "low",
+            "persona": "natalie",
+            "persona_name": "נטלי",
+            "tactic": "education",
             "tts_speed": tts_speed,
             "prompt_chars": len(system_prompt),
         }
@@ -670,6 +698,18 @@ class BrowserSession:
         self._last_response = None
 
     async def start(self):
+        if AGENT_MODE == "investor":
+            self.session_id = f"investor-{int(time.time() * 1000)}"
+            await self.ws.send_str(json.dumps({
+                "type": "session_started",
+                "session_id": self.session_id,
+                "persona": "natalie",
+                "persona_name": "נטלי",
+                "support_score": 1.0,
+                "mode": "investor",
+            }, ensure_ascii=False))
+            return
+
         self.session_id = self.engine.create_session()
 
         session_info = self.engine.agent.get_session(self.session_id) if hasattr(self.engine.agent, 'get_session') else None
