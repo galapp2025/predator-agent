@@ -54,6 +54,8 @@ TTS_MAX_RETRIES = int(os.getenv("CARTESIA_TTS_RETRIES", "3"))
 _cartesia_skip_until = 0.0
 TTS_PROVIDER = (os.getenv("TTS_PROVIDER") or "local").strip().lower()  # local=<1s ; openai/cartesia=איכות
 GROQ_VOICE_MODEL = os.getenv("GROQ_VOICE_MODEL", "llama-3.1-8b-instant")
+# investor = נטלי לדמו משקיעים ; voter = שיחות שטח לבוחרים
+DEMO_MODE = (os.getenv("DEMO_MODE") or "investor").strip().lower()
 
 # Deepgram — endpointing אגרסיבי לתגובה מהירה לסוף דיבור
 DG_URL = (
@@ -66,8 +68,8 @@ DG_URL = (
 # אישור speechSynthesis הוסר — קול אחר = מרגיש רובוטי
 
 
-def _clip_spoken_reply(text: str, max_words: int = 16) -> str:
-    """מנקה תשובות מתסריט ושומר אורך טלפוני טבעי."""
+def _clip_spoken_reply(text: str, max_words: int = 28) -> str:
+    """מנקה תשובות ושומר אורך שיחתי טבעי."""
     t = (text or "").strip()
     t = re.sub(r"\[.*?\]", "", t)
     t = re.sub(r"\(.*?\)", "", t)
@@ -87,12 +89,13 @@ def _clip_spoken_reply(text: str, max_words: int = 16) -> str:
             break
         t = cleaned
     parts = re.split(r"(?<=[.!?…])\s+", t)
-    if len(parts) > 2:
-        t = " ".join(parts[:2]).strip()
+    max_parts = 3 if DEMO_MODE in {"investor", "natalie", "demo"} else 2
+    if len(parts) > max_parts:
+        t = " ".join(parts[:max_parts]).strip()
     words = t.split()
     if len(words) > max_words:
         t = " ".join(words[:max_words]).rstrip(",;") + "."
-    return t or "אני כאן, תגיד."
+    return t or "אני כאן, אפשר להמשיך."
 
 
 def pcm16_to_wav(pcm: bytes, sample_rate: int = 24000) -> bytes:
@@ -155,6 +158,7 @@ class VoiceSession:
 
     async def start_agent_session(self, voter: Optional[dict] = None) -> None:
         from src.enrichment.voter_context import VoterContextBuilder
+        from src.llm.investor_prompt import NATALIE_NAME
         from src.llm.prompt_builder import PERSONA_AGENT_NAME
 
         ctx = None
@@ -162,20 +166,25 @@ class VoiceSession:
         if voter:
             phone = str(voter.get("phone") or "")
             ctx = VoterContextBuilder().build(
-                first_name=voter.get("first_name", "בוחר"),
+                first_name=voter.get("first_name", "אורח"),
                 last_name=voter.get("last_name", ""),
-                city=voter.get("city", "פתח תקווה"),
+                city=voter.get("city", "תל אביב"),
                 street=voter.get("street", ""),
                 house_number=voter.get("house_number", ""),
                 support_score=float(voter.get("support_score") or 0.55),
-                campaign_type=voter.get("campaign_type") or voter.get("campaign") or "primaries",
+                campaign_type=voter.get("campaign_type") or voter.get("campaign") or "general",
                 gender=voter.get("gender") or "",
             )
         session = self.agent.create_session(self.session_id, voter_context=ctx, phone=phone)
+        # דמו משקיעים — תמיד נטלי (פרסונה נשית)
+        if DEMO_MODE in {"investor", "natalie", "demo"}:
+            session.current_persona = "C"
+            agent_name = NATALIE_NAME
+        else:
+            agent_name = PERSONA_AGENT_NAME.get(session.current_persona, "דוד")
         self._agent_ready = True
         self._touch()
         self._silence_task = None
-        agent_name = PERSONA_AGENT_NAME.get(session.current_persona, "דוד")
         await self.send_json(
             {
                 "type": "ready",
@@ -184,9 +193,38 @@ class VoiceSession:
                 "persona": session.current_persona,
                 "voter_name": (ctx.first_name if ctx else "") or "",
                 "voter_gender": (ctx.gender if ctx else "") or "",
-                "campaign_type": (ctx.campaign_type if ctx else "") or "primaries",
+                "campaign_type": (ctx.campaign_type if ctx else "") or "general",
+                "demo_mode": DEMO_MODE,
             }
         )
+        # פתיחה קצרה של נטלי — בלי להמתין לדיבור ראשון
+        if DEMO_MODE in {"investor", "natalie", "demo"}:
+            greet_name = (ctx.first_name if ctx else "") or ""
+            if greet_name and greet_name not in {"אורח", "בוחר", "רחל"}:
+                greet = (
+                    f"היי {greet_name}, אני נטלי ממערכת לניהול קמפיינים ובחירות. "
+                    f"אשמח להסביר על המערכת — מה מעניין אותך להתחיל?"
+                )
+            else:
+                greet = (
+                    "היי, אני נטלי ממערכת לניהול קמפיינים ובחירות. "
+                    "אשמח להסביר על המערכת ולענות על שאלות — מה תרצה לפתוח איתו?"
+                )
+            self.agent.add_assistant_response(self.session_id, greet)
+            await self.send_json(
+                {
+                    "type": "pipeline",
+                    "stt": "(opening)",
+                    "disc": "investor",
+                    "state": "opening",
+                    "persona": "Natalie",
+                    "llm": greet,
+                    "latency_ms": 0,
+                }
+            )
+            await self.send_json(
+                {"type": "speak_local", "text": greet, "lang": "he-IL", "latency_ms": 0}
+            )
 
     async def _silence_watchdog(self) -> None:
         from src.agent.predator import SILENCE_TIMEOUT_SEC
@@ -525,6 +563,7 @@ class VoiceSession:
     async def _run_pipeline(self, voter_text: str) -> None:
         t0 = time.time()
         await self.send_json({"type": "status", "stage": "predator"})
+        investor = DEMO_MODE in {"investor", "natalie", "demo"}
         turn = await self.agent.process_voter_turn(
             self.session_id,
             voter_text,
@@ -535,14 +574,30 @@ class VoiceSession:
             await self.send_json({"type": "error", "message": turn["error"]})
             return
 
-        if turn.get("forced_reply"):
+        if turn.get("forced_reply") and not investor:
             reply = turn["forced_reply"]
             await self.send_json({"type": "status", "stage": "battle"})
         else:
             await self.send_json({"type": "status", "stage": "llm"})
-            reply = await self._llm_reply(turn["system_prompt"], voter_text)
+            if investor:
+                from src.llm.investor_prompt import build_investor_prompt
 
-        reply = _clip_spoken_reply(reply, max_words=18)
+                sess = self.agent.active_sessions.get(self.session_id)
+                inv_name = ""
+                inv_gender = ""
+                if sess and sess.voter_context:
+                    inv_name = sess.voter_context.first_name or ""
+                    inv_gender = sess.voter_context.gender or ""
+                system_prompt = build_investor_prompt(
+                    investor_name=inv_name,
+                    investor_gender=inv_gender,
+                )
+                reply = await self._llm_reply(system_prompt, voter_text, investor=True)
+            else:
+                reply = await self._llm_reply(turn["system_prompt"], voter_text)
+
+        max_words = 32 if investor else 18
+        reply = _clip_spoken_reply(reply, max_words=max_words)
         # אל תוסיף ל-history אם זהה לתשובה הקודמת (מונע לולאת חזרה)
         sess = self.agent.active_sessions.get(self.session_id)
         if sess and sess.conversation_history:
@@ -551,21 +606,24 @@ class VoiceSession:
                 "",
             )
             if prev and self._norm_he(prev) == self._norm_he(reply):
-                g = (sess.voter_context.gender if sess.voter_context else "") or ""
-                name = (sess.voter_context.first_name if sess.voter_context else "") or ""
-                ctype = ((sess.voter_context.campaign_type if sess.voter_context else "") or "primaries").lower()
-                if ctype in {"municipal", "local", "city", "מוניציפלי"}:
-                    topic = "לבחירות בעיר"
-                elif ctype in {"general", "national", "knesset", "כללי", "כנסת"}:
-                    topic = "לבחירות לכנסת"
+                if investor:
+                    reply = "זו שאלה חשובה — מה הכי מעניין אותך כרגע, הטכנולוגיה או המודל העסקי?"
                 else:
-                    topic = "לפריימריז בסניף"
-                if g == "female":
-                    reply = f"סבבה{', ' + name if name else ''}, נחזור לעניין — את מגיעה {topic}?"
-                elif g == "male":
-                    reply = f"סבבה{', ' + name if name else ''}, נחזור לעניין — אתה מגיע {topic}?"
-                else:
-                    reply = f"סבבה, נחזור לעניין — מגיעים {topic}?"
+                    g = (sess.voter_context.gender if sess.voter_context else "") or ""
+                    name = (sess.voter_context.first_name if sess.voter_context else "") or ""
+                    ctype = ((sess.voter_context.campaign_type if sess.voter_context else "") or "primaries").lower()
+                    if ctype in {"municipal", "local", "city", "מוניציפלי"}:
+                        topic = "לבחירות בעיר"
+                    elif ctype in {"general", "national", "knesset", "כללי", "כנסת"}:
+                        topic = "לבחירות לכנסת"
+                    else:
+                        topic = "לפריימריז בסניף"
+                    if g == "female":
+                        reply = f"סבבה{', ' + name if name else ''}, נחזור לעניין — את מגיעה {topic}?"
+                    elif g == "male":
+                        reply = f"סבבה{', ' + name if name else ''}, נחזור לעניין — אתה מגיע {topic}?"
+                    else:
+                        reply = f"סבבה, נחזור לעניין — מגיעים {topic}?"
         self.agent.add_assistant_response(self.session_id, reply)
 
         llm_ms = int((time.time() - t0) * 1000)
@@ -573,9 +631,9 @@ class VoiceSession:
             {
                 "type": "pipeline",
                 "stt": voter_text,
-                "disc": turn.get("disc"),
+                "disc": "investor" if investor else turn.get("disc"),
                 "state": turn.get("state"),
-                "persona": turn.get("persona"),
+                "persona": "Natalie" if investor else turn.get("persona"),
                 "llm": reply,
                 "latency_ms": llm_ms,
             }
@@ -583,7 +641,7 @@ class VoiceSession:
 
         # נתיב <1s: דיבור מקומי בדפדפן (OpenAI TTS ~4s — לא עומד ביעד)
         if TTS_PROVIDER in {"local", "browser", "webkit"}:
-            approx_sec = max(0.5, min(3.0, 0.28 * max(1, len(reply.split()))))
+            approx_sec = max(0.5, min(4.0, 0.28 * max(1, len(reply.split()))))
             self._speaking_until = time.time() + approx_sec
             total_ms = int((time.time() - t0) * 1000)
             await self.send_json(
@@ -619,39 +677,39 @@ class VoiceSession:
         )
         await self.send_json({"type": "status", "stage": "idle"})
 
-    async def _llm_reply(self, system_prompt: str, user_text: str) -> str:
+    async def _llm_reply(self, system_prompt: str, user_text: str, *, investor: bool = False) -> str:
         from src.agent.predator import TURN_BUDGET_SEC
         from src.llm.fast_llm import FastLLM
 
         llm = FastLLM(
-            temperature=0.7,
-            max_tokens=64,
+            temperature=0.65 if investor else 0.7,
+            max_tokens=110 if investor else 64,
             top_p=0.9,
             groq_model=GROQ_VOICE_MODEL,
         )
         if llm.provider == "none":
-            return "אני כאן, תגיד."
+            return "אני כאן, אפשר להמשיך."
         history: List[Dict[str, str]] = []
         sess = self.agent.active_sessions.get(self.session_id)
+        hist_n = 8 if investor else 6
+        hist_chars = 280 if investor else 220
         if sess and sess.conversation_history:
-            for h in sess.conversation_history[:-1][-6:]:
+            for h in sess.conversation_history[:-1][-hist_n:]:
                 role = h.get("role")
                 content = (h.get("content") or "").strip()
                 if role in ("user", "assistant") and content:
-                    history.append({"role": role, "content": content[:220]})
-        # משתמשים בפרומפט המלא של Predator (קמפיין/פריימריז/מוניציפלי) — לא tiny
+                    history.append({"role": role, "content": content[:hist_chars]})
         grounded = (system_prompt or "").strip()
         if len(grounded) < 80:
             grounded = (
-                "אתה נציג מטה בקמפיין בחירות בישראל. עברית מדוברת. "
-                "הישאר בבחירות כלליות / מוניציפליות / פריימריז לפי הקונטקסט. "
-                "משפט אחד-שניים. בלי סיסמאות."
+                "את נטלי ממערכת לניהול קמפיינים ובחירות. עברית מדוברת. "
+                "הסבירי על הפלטפורמה למשקיעים. משפט-שניים + שאלה."
             )
         return await llm.reply(
             grounded,
             user_text,
             self.http,
-            timeout_sec=min(4.0, float(TURN_BUDGET_SEC)),
+            timeout_sec=min(4.5 if investor else 4.0, float(TURN_BUDGET_SEC)),
             history=history,
         )
 
@@ -970,7 +1028,7 @@ async def on_startup(app: web.Application) -> None:
     }.items() if not v]
     if missing:
         log.warning("Missing keys: %s", ", ".join(missing))
-    log.info("PREDATOR OPS LIVE http://%s:%s tts=%s", HOST, PORT, TTS_PROVIDER)
+    log.info("PREDATOR OPS LIVE http://%s:%s tts=%s demo=%s", HOST, PORT, TTS_PROVIDER, DEMO_MODE)
 
 
 async def on_cleanup(app: web.Application) -> None:

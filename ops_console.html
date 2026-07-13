@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>PREDATOR OPS — שיחה חיה</title>
+  <title>נטלי — דמו למשקיעים | PREDATOR</title>
   <style>
     :root {
       --bg: #0b1017; --card: #141c27; --line: #2a3848; --text: #eef3f8;
@@ -59,13 +59,12 @@
 <body>
   <div class="banner warn" id="cursorWarn">אין לפתוח מתוך Cursor. השתמשו ב-Google Chrome בלבד.</div>
   <div class="banner" id="demoBanner">
-    <strong>דמו לצוות בדיקה</strong> · Chrome בלבד · אשרו מיקרופון · לחצו «התחל שיחה» ודברו בעברית.
-    אפשר גם לשלוח טקסט למטה אם אין מיק.
+    <strong>דמו משקיעים · נטלי</strong> · Chrome בלבד · אשרו מיקרופון · שאלו על המוצר, הטכנולוגיה, השוק או המודל העסקי.
   </div>
   <header>
     <div>
-      <h1>PREDATOR OPS</h1>
-      <div class="sub">שיחה חיה בעברית · STT → Predator → LLM → קול · יעד תגובה &lt;1s</div>
+      <h1>נטלי</h1>
+      <div class="sub">סוכנת קולית · מערכת לניהול קמפיינים ובחירות · דמו למשקיעים</div>
     </div>
     <div>
       <span class="pill" id="wsPill">WS: off</span>
@@ -77,23 +76,23 @@
     <aside class="card">
       <div class="row"><span>Session</span><span id="sid">—</span></div>
       <div class="row"><span>Status</span><span id="status">מחבר…</span></div>
-      <div class="row"><span>סוכן</span><span id="agentOut">—</span></div>
-      <div class="row"><span>בוחר/ת</span><span id="voterOut">—</span></div>
-      <label class="sub">שם פרטי (מי מדבר)</label>
-      <input id="voterFirst" value="רחל" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0d141d;color:var(--text)" />
+      <div class="row"><span>סוכנת</span><span id="agentOut">נטלי</span></div>
+      <div class="row"><span>אורח/ת</span><span id="voterOut">—</span></div>
+      <label class="sub">שם (אופציונלי)</label>
+      <input id="voterFirst" value="" placeholder="למשל: דני" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0d141d;color:var(--text)" />
       <label class="sub">שם משפחה</label>
-      <input id="voterLast" value="לוי" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0d141d;color:var(--text)" />
-      <label class="sub">מגדר</label>
+      <input id="voterLast" value="" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0d141d;color:var(--text)" />
+      <label class="sub">מגדר פנייה</label>
       <select id="voterGender" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0d141d;color:var(--text)">
-        <option value="female" selected>נקבה — את / שלך</option>
-        <option value="male">זכר — אתה / שלך</option>
-        <option value="">לפי השם</option>
+        <option value="male" selected>זכר — אתה / שלך</option>
+        <option value="female">נקבה — את / שלך</option>
+        <option value="">ניטרלי</option>
       </select>
-      <label class="sub">סוג קמפיין</label>
+      <label class="sub">מיקוד שיחה (רשות)</label>
       <select id="campaignType" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0d141d;color:var(--text)">
-        <option value="primaries" selected>פריימריז</option>
-        <option value="municipal">מוניציפליות</option>
-        <option value="general">בחירות כלליות (כנסת)</option>
+        <option value="general" selected>סקירה כללית</option>
+        <option value="primaries">פריימריז / שטח</option>
+        <option value="municipal">מוניציפלי</option>
       </select>
       <button id="btnMic" disabled>התחל שיחה (מיקרופון)</button>
       <div class="meter"><span id="levelBar"></span></div>
@@ -224,15 +223,16 @@
         $('wsPill').classList.add('on');
         log('connected');
         const gender = $('voterGender').value;
+        const first = ($('voterFirst').value || '').trim() || 'אורח';
         ws.send(JSON.stringify({
           type: 'start',
           voter: {
-            first_name: ($('voterFirst').value || 'רחל').trim(),
+            first_name: first,
             last_name: ($('voterLast').value || '').trim(),
             gender: gender,
-            campaign_type: ($('campaignType').value || 'primaries'),
-            city: 'פתח תקווה',
-            street: 'הרצל', house_number: '12', support_score: 0.62, phone: '0501234567'
+            campaign_type: ($('campaignType').value || 'general'),
+            city: 'תל אביב',
+            street: '', house_number: '', support_score: 0.55, phone: ''
           }
         }));
       };
@@ -264,8 +264,8 @@
           const vg = msg.voter_gender === 'female' ? 'נקבה' : (msg.voter_gender === 'male' ? 'זכר' : '');
           $('agentOut').textContent = ag;
           $('voterOut').textContent = vg ? `${vn} · ${vg}` : vn;
-          $('llmOut').textContent = `מערכת חיה. מדבר/ת: ${ag} → ${vn}. לחץ מיקרופון.`;
-          log('session ' + msg.session_id + ' agent=' + ag + ' voter=' + vn);
+          $('llmOut').textContent = `נטלי מוכנה. לחצו מיקרופון ושאלו על המערכת.`;
+          log('session ' + msg.session_id + ' agent=' + ag + ' guest=' + vn);
         } else if (msg.type === 'stt_ready' || (msg.type === 'stt_status' && msg.ok)) {
           sttReady = true;
           if (sttWaitResolve) { sttWaitResolve(); sttWaitResolve = null; }
