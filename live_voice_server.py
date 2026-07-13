@@ -89,7 +89,7 @@ def _clip_spoken_reply(text: str, max_words: int = 28) -> str:
             break
         t = cleaned
     parts = re.split(r"(?<=[.!?…])\s+", t)
-    max_parts = 3 if DEMO_MODE in {"investor", "natalie", "demo"} else 2
+    max_parts = 5 if DEMO_MODE in {"investor", "natalie", "demo"} else 2
     if len(parts) > max_parts:
         t = " ".join(parts[:max_parts]).strip()
     words = t.split()
@@ -203,12 +203,12 @@ class VoiceSession:
             if greet_name and greet_name not in {"אורח", "בוחר", "רחל"}:
                 greet = (
                     f"היי {greet_name}, אני נטלי ממערכת לניהול קמפיינים ובחירות. "
-                    f"אשמח להסביר על המערכת — מה מעניין אותך להתחיל?"
+                    f"אפשר לשאול אותי על המוצר או על איך הבחירות עובדות — במה נתחיל?"
                 )
             else:
                 greet = (
                     "היי, אני נטלי ממערכת לניהול קמפיינים ובחירות. "
-                    "אשמח להסביר על המערכת ולענות על שאלות — מה תרצה לפתוח איתו?"
+                    "אשמח להסביר על המערכת ועל עולם הבחירות — במה תרצה לפתוח?"
                 )
             self.agent.add_assistant_response(self.session_id, greet)
             await self.send_json(
@@ -591,12 +591,13 @@ class VoiceSession:
                 system_prompt = build_investor_prompt(
                     investor_name=inv_name,
                     investor_gender=inv_gender,
+                    focus=(sess.voter_context.campaign_type if sess and sess.voter_context else "") or "",
                 )
                 reply = await self._llm_reply(system_prompt, voter_text, investor=True)
             else:
                 reply = await self._llm_reply(turn["system_prompt"], voter_text)
 
-        max_words = 32 if investor else 18
+        max_words = 48 if investor else 18
         reply = _clip_spoken_reply(reply, max_words=max_words)
         # אל תוסיף ל-history אם זהה לתשובה הקודמת (מונע לולאת חזרה)
         sess = self.agent.active_sessions.get(self.session_id)
@@ -683,7 +684,7 @@ class VoiceSession:
 
         llm = FastLLM(
             temperature=0.65 if investor else 0.7,
-            max_tokens=110 if investor else 64,
+            max_tokens=160 if investor else 64,
             top_p=0.9,
             groq_model=GROQ_VOICE_MODEL,
         )
