@@ -57,12 +57,15 @@
   </style>
 </head>
 <body>
-  <div class="banner warn" id="cursorWarn">אסור לפתוח מתוך Cursor. רק Chrome: http://localhost:8766/</div>
-  <div class="banner">מערכת מבצעית · http://localhost:8766 · סגור Cursor Simple Browser</div>
+  <div class="banner warn" id="cursorWarn">אין לפתוח מתוך Cursor. השתמשו ב-Google Chrome בלבד.</div>
+  <div class="banner" id="demoBanner">
+    <strong>דמו לצוות בדיקה</strong> · Chrome בלבד · אשרו מיקרופון · לחצו «התחל שיחה» ודברו בעברית.
+    אפשר גם לשלוח טקסט למטה אם אין מיק.
+  </div>
   <header>
     <div>
       <h1>PREDATOR OPS</h1>
-      <div class="sub">שיחה חיה · Deepgram → Predator → Groq → Cartesia</div>
+      <div class="sub">שיחה חיה בעברית · STT → Predator → LLM → קול · יעד תגובה &lt;1s</div>
     </div>
     <div>
       <span class="pill" id="wsPill">WS: off</span>
@@ -434,10 +437,9 @@
 
     if (/Cursor|Electron/i.test(navigator.userAgent)) {
       $('cursorWarn').style.display = 'block';
-      setErr('סגור את Cursor ופתח Google Chrome בלבד: http://localhost:8766/');
+      setErr('פתחו את הקישור ב-Google Chrome (לא מתוך Cursor).');
       $('btnMic').disabled = true;
       $('btnText').disabled = true;
-      // אל תתחבר מ-Cursor — הורג את סשן Chrome
     } else {
       connect();
     }

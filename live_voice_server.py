@@ -219,20 +219,36 @@ class VoiceSession:
                                 }
                             )
                             try:
-                                audio_b64, sr = await self._tts(
-                                    probe["reply"], probe.get("tts_params") or {}
-                                )
-                                await self.send_json(
-                                    {
-                                        "type": "audio",
-                                        "format": "wav",
-                                        "sample_rate": sr,
-                                        "data": audio_b64,
-                                        "text": probe["reply"],
-                                    }
-                                )
+                                if TTS_PROVIDER in {"local", "browser", "webkit"}:
+                                    await self.send_json(
+                                        {
+                                            "type": "speak_local",
+                                            "text": probe["reply"],
+                                            "lang": "he-IL",
+                                        }
+                                    )
+                                else:
+                                    audio_b64, sr = await self._tts(
+                                        probe["reply"], probe.get("tts_params") or {}
+                                    )
+                                    await self.send_json(
+                                        {
+                                            "type": "audio",
+                                            "format": "wav",
+                                            "sample_rate": sr,
+                                            "data": audio_b64,
+                                            "text": probe["reply"],
+                                        }
+                                    )
                             except Exception as e:
                                 log.warning("silence TTS skipped: %s", e)
+                                await self.send_json(
+                                    {
+                                        "type": "speak_local",
+                                        "text": probe["reply"],
+                                        "lang": "he-IL",
+                                    }
+                                )
                         finally:
                             self.busy = False
                             self._touch()
@@ -812,11 +828,12 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
     # Cursor Simple Browser הורג סשנים + אין מיקרופון אמיתי
     if "Cursor/" in ua:
         log.warning("reject Cursor browser UA — mic will not work")
+        demo_url = f"{request.url.scheme}://{request.host}/"
         try:
             await ws.send_json(
                 {
                     "type": "error",
-                    "message": "אסור לפתוח מתוך Cursor. סגור את החלונית ופתח רק Google Chrome: http://localhost:8766/",
+                    "message": f"פתחו ב-Google Chrome בלבד (לא Cursor): {demo_url}",
                 }
             )
         except Exception:
@@ -824,51 +841,28 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
         await ws.close()
         return ws
 
-    # סשן מבצעי יחיד — Chrome לא נזרק בגלל בדיקות Python/סקריפטים
-    prev: Optional[VoiceSession] = request.app.get("active_session")
-    is_browser = "Mozilla/" in ua and "Python/" not in ua
-    if prev is not None:
-        prev_ua = getattr(prev, "ua", "") or ""
-        prev_is_browser = "Mozilla/" in prev_ua and "Python/" not in prev_ua
-        if prev_is_browser and not is_browser:
-            log.warning("reject non-browser while Chrome OPS live — keep %s", prev.session_id)
-            try:
-                await ws.send_json(
-                    {
-                        "type": "error",
-                        "message": "סשן Chrome פעיל — סגור את הטאב או נתק לפני חיבור אחר",
-                    }
-                )
-            except Exception:
-                pass
-            await ws.close()
-            return ws
+    # כמה בודקים במקביל (צוות משקיעים) — לא בועטים סשנים פעילים
+    sessions: Dict[str, VoiceSession] = request.app["sessions"]
+    max_sessions = int(os.getenv("MAX_VOICE_SESSIONS", "12"))
+    if len(sessions) >= max_sessions:
         try:
-            await prev.send_json(
+            await ws.send_json(
                 {
-                    "type": "kicked",
-                    "message": "סשן חדש תפס את הקו — סגור טאבים כפולים ב-Chrome",
+                    "type": "error",
+                    "message": "השרת עמוס — נסו שוב בעוד דקה (יותר מדי סשנים פעילים)",
                 }
             )
         except Exception:
             pass
-        try:
-            await prev.close()
-        except Exception:
-            pass
-        try:
-            if not prev.ws.closed:
-                await prev.ws.close()
-        except Exception:
-            pass
-        request.app["active_session"] = None
+        await ws.close()
+        return ws
 
     agent = request.app["agent"]
     http = request.app["http"]
     session = VoiceSession(ws, agent, http)
     session.ua = ua
-    request.app["active_session"] = session
-    log.info("OPS session → %s ua=%s", session.session_id, ua[:60])
+    sessions[session.session_id] = session
+    log.info("OPS session → %s ua=%s active=%d", session.session_id, ua[:60], len(sessions))
 
     try:
         async for msg in ws:
@@ -911,15 +905,26 @@ async def ws_handler(request: web.Request) -> web.WebSocketResponse:
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 break
     finally:
-        if request.app.get("active_session") is session:
-            request.app["active_session"] = None
+        sessions.pop(session.session_id, None)
         await session.close()
-        log.info("OPS session closed → %s", session.session_id)
+        log.info("OPS session closed → %s active=%d", session.session_id, len(sessions))
     return ws
 
 
 async def index_handler(_: web.Request) -> web.FileResponse:
     return web.FileResponse(ROOT / "ops_console.html")
+
+
+async def health_handler(request: web.Request) -> web.Response:
+    sessions = request.app.get("sessions") or {}
+    return web.json_response(
+        {
+            "ok": True,
+            "service": "predator-ops",
+            "tts": TTS_PROVIDER,
+            "sessions": len(sessions),
+        }
+    )
 
 
 async def on_startup(app: web.Application) -> None:
@@ -928,16 +933,15 @@ async def on_startup(app: web.Application) -> None:
     connector = aiohttp.TCPConnector(ssl=SSL_CTX)
     app["agent"] = PredatorAgent()
     app["http"] = aiohttp.ClientSession(connector=connector)
-    app["active_session"] = None
+    app["sessions"] = {}
     missing = [k for k, v in {
         "DEEPGRAM_API_KEY": DEEPGRAM_API_KEY,
-        "CARTESIA_API_KEY": CARTESIA_API_KEY,
         "OPENAI_API_KEY": OPENAI_API_KEY,
         "GROQ_API_KEY": os.getenv("GROQ_API_KEY", ""),
     }.items() if not v]
     if missing:
         log.warning("Missing keys: %s", ", ".join(missing))
-    log.info("PREDATOR OPS LIVE http://%s:%s", HOST, PORT)
+    log.info("PREDATOR OPS LIVE http://%s:%s tts=%s", HOST, PORT, TTS_PROVIDER)
 
 
 async def on_cleanup(app: web.Application) -> None:
@@ -948,6 +952,7 @@ def main() -> None:
     app = web.Application()
     app.router.add_get("/", index_handler)
     app.router.add_get("/test_voice.html", index_handler)
+    app.router.add_get("/health", health_handler)
     app.router.add_get("/ws", ws_handler)
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
