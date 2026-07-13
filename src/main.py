@@ -25,6 +25,7 @@ CONFIG = {
     "cartesia_api_key": os.getenv("CARTESIA_API_KEY"),
     "openai_api_key": os.getenv("OPENAI_API_KEY"),
     "anthropic_api_key": os.getenv("ANTHROPIC_API_KEY"),
+    "groq_api_key": os.getenv("GROQ_API_KEY"),
     "cartesia_voice_male": os.getenv(
         "CARTESIA_VOICE_MALE", "ff857c8e-e7f9-4afd-af42-dce9f3c5ab02"
     ),
@@ -110,15 +111,40 @@ def main():
     print(f"[Config] livekit={CONFIG['livekit_url']}")
     print(f"[Config] deepgram={'OK' if CONFIG['deepgram_api_key'] else 'MISSING'}")
     print(f"[Config] cartesia={'OK' if CONFIG['cartesia_api_key'] else 'MISSING'}")
-    print(f"[Config] openai={'OK' if CONFIG['openai_api_key'] else 'MISSING'}")
-    print(f"[Config] anthropic={'OK' if CONFIG['anthropic_api_key'] else 'MISSING'}\n")
+    print(f"[Config] groq={'OK' if CONFIG['groq_api_key'] else 'MISSING'}")
+    print(f"[Config] openai={'OK' if CONFIG['openai_api_key'] else 'MISSING'} (fallback)")
+    print(f"[Config] anthropic={'OK' if CONFIG['anthropic_api_key'] else 'MISSING'} (slow)\n")
 
     if mode == "dev":
         asyncio.run(dev_mode())
     elif mode == "queue-start":
-        print("queue-start mode — see data/leads.csv")
+        from .telephony.call_queue import CallQueue
+        from .telephony.outbound_dialer import LeadLoader
+
+        q = CallQueue(agent=None)
+        leads = LeadLoader(os.getenv("LEADS_CSV", "data/leads.csv")).load_sorted_by_persuadability()
+        for lead in leads:
+            q.enqueue_outbound(lead)
+        print(f"queue-start: enqueued {len(leads)} leads")
+        print(q.stats() if hasattr(q, "stats") else f"size={len(q._queue)}")
     elif mode == "campaign":
-        print("campaign mode — see telephony/")
+        from .agent.predator import PredatorAgent
+        from .telephony.call_queue import CallQueue
+        from .telephony.outbound_dialer import OutboundDialer
+
+        async def _campaign():
+            os.environ.setdefault("DIALER_FORCE", "1")
+            agent = PredatorAgent()
+            queue = CallQueue(agent=agent)
+            dialer = OutboundDialer(agent=agent, queue=queue)
+            records = await dialer.run_campaign_from_csv()
+            print(f"campaign done: {len(records)} records")
+            for r in records[:3]:
+                print(f"  {r.full_name} → {r.result}")
+
+        asyncio.run(_campaign())
+    elif mode == "voice":
+        print("voice mode — run: PYTHONPATH=. python3 live_voice_server.py")
     else:
         print(f"Unknown mode: {mode}")
         sys.exit(1)

@@ -25,10 +25,10 @@ PERSONAS = {
         name="אלון",
         disc="D",
         voice_id="ff857c8e-e7f9-4afd-af42-dce9f3c5ab02",
-        speed=1.15,
-        stability=0.38,
-        similarity=0.80,
-        tone="ישיר, בטוח, חד. מדבר מהר. חותך התלבטויות במשפט.",
+        speed=1.02,
+        stability=0.40,
+        similarity=0.82,
+        tone="ישיר אבל אנושי. מדבר בקצב שיחה, לא חדשות. משפטים קצרים עם הפסקות.",
         forbidden_words=["אולי", "לדעתי", "נראה לי", "אם אתה רוצה", "תחשוב על זה", "קח את הזמן"],
         signature_phrases=[
             "תקשיב, אני אגיד לך בדיוק מה המצב.",
@@ -47,10 +47,10 @@ PERSONAS = {
         name="מיה",
         disc="I",
         voice_id="3e32f3c5-9ac0-4192-9994-87fdb277120f",
-        speed=1.08,
-        stability=0.42,
-        similarity=0.82,
-        tone="חמה, נלהבת, סיפורית. מדברת עם חיוך בקול. קופצת בין נושאים.",
+        speed=1.0,
+        stability=0.43,
+        similarity=0.83,
+        tone="חמה, חיה, שיחתית. קצב טבעי של טלפון, לא מונוטוני.",
         forbidden_words=["בכל אופן", "מצד שני", "לסיכום", "אובייקטיבית", "סטטיסטית", "אם תרצה"],
         signature_phrases=[
             "תשמע, אני אספר לך סיפור —",
@@ -69,10 +69,10 @@ PERSONAS = {
         name="דוד",
         disc="S",
         voice_id="ff857c8e-e7f9-4afd-af42-dce9f3c5ab02",
-        speed=0.88,
-        stability=0.50,
+        speed=0.94,
+        stability=0.46,
         similarity=0.84,
-        tone="עמוק, רגוע, חם. מדבר לאט. נותן מרחב. מקשיב הרבה לפני שמדבר.",
+        tone="רגוע וחם. קצב שיחה אנושי, לא איטי מדי ולא רובוטי.",
         forbidden_words=["מהר", "עכשיו", "תכף", "בלי לחשוב", "קדימה", "אין זמן"],
         signature_phrases=[
             "תקשיב, אין שום לחץ.",
@@ -91,10 +91,10 @@ PERSONAS = {
         name="רונית",
         disc="C",
         voice_id="3e32f3c5-9ac0-4192-9994-87fdb277120f",
-        speed=0.95,
-        stability=0.48,
+        speed=0.97,
+        stability=0.45,
         similarity=0.83,
-        tone="מדויק, מאופק, אמין. מדבר במשפטים קצרים וברורים. נמנעת מסופרלטיבים.",
+        tone="ברור ואמין. מדברת כמו אדם בטלפון, לא כמו מצגת.",
         forbidden_words=["מדהים", "וואו", "בלתי רגיל", "אין ספק", "כולם אומרים", "תרגיש", "תאמין לי"],
         signature_phrases=[
             "הנתונים מראים ש—",
@@ -125,14 +125,19 @@ def get_speed(disc: str) -> float:
 
 
 def get_tts_params(disc: str) -> dict:
-    """Cartesia Hebrew — stability 0.38–0.50, similarity 0.80–0.84."""
+    """Cartesia Hebrew — קצב שיחה טבעי + רגש לפי פרסונה."""
     persona = get_persona(disc)
+    emotion = {"D": "confident", "I": "content", "S": "calm", "C": "content"}.get(
+        disc, "calm"
+    )
     return {
         "voice_id": persona.voice_id,
         "speed": persona.speed,
         "stability": persona.stability,
         "similarity": persona.similarity,
         "language": "he",
+        "emotion": emotion,
+        "volume": 1.0,
     }
 
 

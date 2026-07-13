@@ -1,4 +1,4 @@
-"""Slow LLM — Claude Sonnet — ניתוח פסיכולוגי"""
+"""Slow LLM — Claude Sonnet 5 — ניתוח פסיכולוגי"""
 
 from __future__ import annotations
 
@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 logger = logging.getLogger("slow-llm")
+
+DEFAULT_SLOW_MODEL = os.getenv("SLOW_LLM_MODEL", "claude-sonnet-5")
 
 
 @dataclass
@@ -29,10 +31,10 @@ class SlowLLMAnalyzer:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "claude-sonnet-4-20250514",
+        model: str = DEFAULT_SLOW_MODEL,
     ):
         self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self.model = model
+        self.model = model or DEFAULT_SLOW_MODEL
         self._client = None
 
     @property
@@ -56,14 +58,24 @@ class SlowLLMAnalyzer:
 
         prompt = self._build_prompt(conversation_history, voter_context)
         try:
-            response = await self.client.messages.create(
-                model=self.model,
-                max_tokens=800,
-                temperature=0.3,
-                system="אתה פסיכולוג פוליטי. עונה רק ב-JSON תקין. בלי markdown.",
-                messages=[{"role": "user", "content": prompt}],
-            )
-            content = response.content[0].text
+            kwargs = {
+                "model": self.model,
+                "max_tokens": 800,
+                "system": "אתה פסיכולוג פוליטי. עונה רק ב-JSON תקין. בלי markdown.",
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            # Sonnet 5: temperature deprecated / rejected
+            if not str(self.model).startswith("claude-sonnet-5"):
+                kwargs["temperature"] = 0.3
+            response = await self.client.messages.create(**kwargs)
+            content = ""
+            for block in response.content:
+                text = getattr(block, "text", None)
+                if text:
+                    content += text
+            if not content:
+                logger.error("Claude returned no text blocks: %s", response.content)
+                return self._fallback()
             return self._parse_response(content)
         except Exception as e:
             logger.error("Claude error: %s", e)

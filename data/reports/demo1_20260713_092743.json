@@ -1,0 +1,21 @@
+{
+  "voter": "ישראל ישראלי",
+  "call_duration": "3:42",
+  "final_state": "closing",
+  "resistance_peak": "high (exchange 3: 'אתה רובוט?')",
+  "top_issue": "חינוך",
+  "commitment": "הבטיח להגיע ביום שלישי בערב",
+  "recommended_followup": "שלח וואטסאפ יום לפני עם מיקום קלפי",
+  "sentiment_trajectory": [
+    "neutral",
+    "angry",
+    "neutral",
+    "committed"
+  ],
+  "phone": "0501234567",
+  "persona": "S",
+  "resistance": "high",
+  "poll_location": "",
+  "session_id": "demo1",
+  "created_at": "2026-07-13T09:27:43.876951"
+}

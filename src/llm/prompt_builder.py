@@ -519,7 +519,18 @@ class PromptBuilder:
         best_tactic: Optional[str] = None,
         support_score: float = 0.5,
         exchange_number: int = 1,
+        compact: bool = False,
     ) -> str:
+        if compact:
+            return PromptBuilder.build_compact(
+                persona_disc=persona_disc,
+                voter_context=voter_context,
+                state=state,
+                resistance_level=resistance_level,
+                best_tactic=best_tactic,
+                support_score=support_score,
+                exchange_number=exchange_number,
+            )
         parts = [
             SABRA_IDENTITY,
             PERSONA_PROMPTS.get(persona_disc, PERSONA_PROMPTS["S"]),
@@ -547,5 +558,54 @@ class PromptBuilder:
         )
         parts.append(
             "[FINAL]\nדבר עכשיו כמו Sabra ישראלי בטלפון. קצר. חי. מדויק. בלי אנגלית."
+        )
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def build_compact(
+        persona_disc: str = "S",
+        voter_context: Optional[str] = None,
+        state: str = "opening",
+        resistance_level: str = "medium",
+        best_tactic: Optional[str] = None,
+        support_score: float = 0.5,
+        exchange_number: int = 1,
+    ) -> str:
+        """פרומפט קצר לשיחת קול / Groq (מגבלת TPM)."""
+        anti_short = """
+[ANTI_DETECTION]
+- אל תודה שאתה AI/בוט. אף פעם.
+- אם שואלים "אתה רובוט?" → צחק קצר וחזור לנושא: "מה? לא, סתם מתקשר מהמטה."
+- עברית מדוברת בלבד. משפטים קצרים. בלי אנגלית.
+- אם שותקים → "בוחן? אתה שם?"
+""".strip()
+        parts = [
+            SABRA_IDENTITY,
+            PERSONA_PROMPTS.get(persona_disc, PERSONA_PROMPTS["S"]),
+            SPEECH_FILLERS,
+            HUMAN_RULES,
+            anti_short,
+            SITUATION_HANDLERS,
+            OBJECTION_HANDLERS,
+        ]
+        if voter_context:
+            # שמור קצר
+            vc = voter_context if isinstance(voter_context, str) else str(voter_context)
+            parts.insert(2, vc[:600])
+        state_key = (state or "opening").lower()
+        parts.append(STATE_INSTRUCTIONS_TEXT.get(state_key, STATE_INSTRUCTIONS_TEXT["opening"]))
+        if best_tactic:
+            parts.append(f"[TACTIC]\n{best_tactic[:500]}")
+        parts.append(
+            f"[RUNTIME]\nresistance={resistance_level}; support={support_score}; exchange={exchange_number}"
+        )
+        parts.append(
+            """[FINAL — דיבור טלפון טבעי]
+ענה בעברית מדוברת כמו אדם אמיתי בטלפון.
+- משפט-שניים לכל היותר (מקס ~30 מילים).
+- קצב אנושי: פסיקים ונשימות — לא מונולוג ולא "תסריט".
+- אסור: אנגלית, סוגריים, סוגרים מרובעים, מחשבות בקול ("לא, לא אומר את זה"), טון בוט.
+- אל תפתח תמיד באותו משפט. שנה פתיחה.
+- דבר ישירות לבוחר, בלי לספר מה אתה עומד להגיד."""
         )
         return "\n\n".join(parts)

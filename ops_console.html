@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PREDATOR OPS — שיחה חיה</title>
+  <style>
+    :root {
+      --bg: #0b1017; --card: #141c27; --line: #2a3848; --text: #eef3f8;
+      --muted: #8fa3b8; --go: #1faa74; --stop: #d64545; --warn: #e6a23c;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; color: var(--text);
+      font-family: "Segoe UI", Arial, sans-serif;
+      background: #0b1017;
+    }
+    header {
+      padding: 18px 24px; border-bottom: 1px solid var(--line);
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      background: #101822;
+    }
+    h1 { margin: 0; font-size: 1.25rem; letter-spacing: .04em; }
+    .sub { color: var(--muted); font-size: .85rem; margin-top: 4px; }
+    .pill { display: inline-block; padding: 4px 10px; border-radius: 999px; background: #243041; font-size: .78rem; margin-inline-start: 6px; }
+    .pill.on { background: #163528; color: #7ddeb0; }
+    .pill.bad { background: #3a1b1b; color: #ffb4a2; }
+    main { display: grid; grid-template-columns: 360px 1fr; gap: 16px; padding: 18px 24px 36px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+    button {
+      width: 100%; border: 0; border-radius: 10px; padding: 14px 16px;
+      font-weight: 700; font-size: 1rem; cursor: pointer; margin-top: 10px;
+    }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    #btnMic { background: var(--go); color: #04150e; }
+    #btnMic.live { background: var(--stop); color: #fff; }
+    #btnText, #btnReconnect { background: #243041; color: var(--text); }
+    textarea {
+      width: 100%; background: #0d141d; border: 1px solid var(--line); color: var(--text);
+      border-radius: 8px; padding: 10px 12px; margin-top: 8px; min-height: 90px;
+    }
+    .row { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: .88rem; margin: 8px 0; }
+    pre {
+      white-space: pre-wrap; background: #0d141d; border-radius: 10px; padding: 12px;
+      border: 1px solid var(--line); min-height: 140px; font-size: .95rem; line-height: 1.5;
+    }
+    .log { max-height: 220px; overflow: auto; font-size: .8rem; color: var(--muted); }
+    .err { color: #ffb4a2; margin-top: 8px; min-height: 1.2em; font-size: .9rem; font-weight: 600; }
+    .meter { height: 10px; background: #0d141d; border-radius: 999px; overflow: hidden; margin-top: 10px; border: 1px solid var(--line); }
+    .meter > span { display: block; height: 100%; width: 0%; background: var(--go); }
+    .banner {
+      margin: 12px 24px 0; padding: 12px 14px; border-radius: 10px;
+      background: #1a2430; border: 1px solid var(--line); color: var(--muted); font-size: .9rem;
+    }
+    .banner.warn { background: #3a2a12; border-color: #8a6230; color: #ffd9a0; display: none; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="banner warn" id="cursorWarn">אסור לפתוח מתוך Cursor. רק Chrome: http://localhost:8766/</div>
+  <div class="banner">מערכת מבצעית · http://localhost:8766 · סגור Cursor Simple Browser</div>
+  <header>
+    <div>
+      <h1>PREDATOR OPS</h1>
+      <div class="sub">שיחה חיה · Deepgram → Predator → Groq → Cartesia</div>
+    </div>
+    <div>
+      <span class="pill" id="wsPill">WS: off</span>
+      <span class="pill" id="micPill">Mic: off</span>
+      <span class="pill" id="readyPill">OPS: —</span>
+    </div>
+  </header>
+  <main>
+    <aside class="card">
+      <div class="row"><span>Session</span><span id="sid">—</span></div>
+      <div class="row"><span>Status</span><span id="status">מחבר…</span></div>
+      <button id="btnMic" disabled>התחל שיחה (מיקרופון)</button>
+      <div class="meter"><span id="levelBar"></span></div>
+      <div class="row"><span>רמת מיק</span><span id="levelTxt">0%</span></div>
+      <label class="sub">גיבוי טקסט</label>
+      <textarea id="textIn" placeholder="כתוב בעברית…" disabled></textarea>
+      <button id="btnText" disabled>שלח</button>
+      <button id="btnReconnect">התחבר מחדש</button>
+      <div class="err" id="errBox"></div>
+    </aside>
+    <section>
+      <div class="card" style="margin-bottom:12px">
+        <div class="row"><strong>תשובת הסוכן</strong><span id="metaPills"></span></div>
+        <div class="row"><span>STT</span><span id="sttOut">—</span></div>
+        <div class="row"><span>DISC / State</span><span id="pipeOut">—</span></div>
+        <pre id="llmOut">ממתין לחיבור מבצעי…</pre>
+      </div>
+      <div class="card"><strong>לוג</strong><div class="log" id="log"></div></div>
+    </section>
+  </main>
+  <script>
+    const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + (location.host || 'localhost:8765') + '/ws';
+    const $ = (id) => document.getElementById(id);
+    let ws, audioCtx, processor, source, silentGain, stream;
+    let listening = false, playing = false, ready = false;
+    let sttReady = false, sttWaitResolve = null, manualClose = false;
+
+    if (/Cursor|Electron/i.test(navigator.userAgent)) $('cursorWarn').style.display = 'block';
+
+    function log(msg) {
+      $('log').textContent = `[${new Date().toLocaleTimeString()}] ${msg}\n` + $('log').textContent;
+    }
+    function setErr(msg) { $('errBox').textContent = msg || ''; }
+    function setEnabled(on) {
+      $('btnMic').disabled = !on;
+      $('btnText').disabled = !on;
+      $('textIn').disabled = !on;
+    }
+    function setStage(name) { $('status').textContent = name; }
+    function setLevel(pct) {
+      $('levelBar').style.width = pct + '%';
+      $('levelTxt').textContent = Math.round(pct) + '%';
+    }
+    function waitSttReady(ms = 12000) {
+      if (sttReady) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => { sttWaitResolve = null; reject(new Error('Deepgram timeout')); }, ms);
+        sttWaitResolve = () => { clearTimeout(t); resolve(); };
+      });
+    }
+
+    function connect() {
+      if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
+      ready = false; sttReady = false; setEnabled(false); setErr('');
+      setStage('מחבר…');
+      ws = new WebSocket(WS_URL);
+      ws.binaryType = 'arraybuffer';
+      ws.onopen = () => {
+        $('wsPill').textContent = 'WS: on';
+        $('wsPill').classList.add('on');
+        log('connected');
+        ws.send(JSON.stringify({
+          type: 'start',
+          voter: {
+            first_name: 'רחל', last_name: 'לוי', city: 'פתח תקווה',
+            street: 'הרצל', house_number: '12', support_score: 0.62, phone: '0501234567'
+          }
+        }));
+      };
+      ws.onclose = () => {
+        $('wsPill').textContent = 'WS: off';
+        $('wsPill').classList.remove('on');
+        $('readyPill').textContent = 'OPS: —';
+        $('readyPill').classList.remove('on');
+        ready = false; setEnabled(false);
+        if (listening) stopMic();
+        setStage('מנותק');
+        log('disconnected');
+        // אין auto-reconnect — מונע הצפת סשנים
+        if (!manualClose) setErr('נותק. לחץ «התחבר מחדש».');
+      };
+      ws.onerror = () => { setErr('שגיאת WebSocket'); };
+      ws.onmessage = async (ev) => {
+        if (typeof ev.data !== 'string') return;
+        let msg; try { msg = JSON.parse(ev.data); } catch { return; }
+        if (msg.type === 'ready') {
+          ready = true;
+          $('sid').textContent = msg.session_id;
+          $('readyPill').textContent = 'OPS: LIVE';
+          $('readyPill').classList.add('on');
+          setEnabled(true);
+          setStage('מוכן');
+          $('llmOut').textContent = 'מערכת חיה. לחץ מיקרופון או שלח טקסט.';
+          log('session ' + msg.session_id);
+        } else if (msg.type === 'stt_ready' || (msg.type === 'stt_status' && msg.ok)) {
+          sttReady = true;
+          if (sttWaitResolve) { sttWaitResolve(); sttWaitResolve = null; }
+          log('STT ready');
+        } else if (msg.type === 'transcript') {
+          setStage('STT');
+          $('sttOut').textContent = msg.text + (msg.is_final ? '' : ' …');
+        } else if (msg.type === 'status') {
+          setStage(msg.stage || msg.detail || '…');
+        } else if (msg.type === 'pipeline') {
+          $('sttOut').textContent = msg.stt || '—';
+          $('pipeOut').textContent = `${msg.disc || '—'} / ${msg.state || '—'}`;
+          $('llmOut').textContent = msg.llm || '';
+        } else if (msg.type === 'audio') {
+          setStage('TTS');
+          setErr('');
+          await playWavBase64(msg.data);
+          setStage('מוכן');
+        } else if (msg.type === 'error') {
+          setErr(msg.message || 'שגיאה');
+          log('ERROR ' + msg.message);
+          setStage('שגיאה');
+        } else if (msg.type === 'kicked') {
+          setErr(msg.message || 'סשן אחר תפס את הקו');
+        }
+      };
+    }
+
+    function floatTo16BitPCM(float32Array) {
+      const buffer = new ArrayBuffer(float32Array.length * 2);
+      const view = new DataView(buffer);
+      for (let i = 0; i < float32Array.length; i++) {
+        let s = Math.max(-1, Math.min(1, float32Array[i]));
+        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      }
+      return buffer;
+    }
+    function downsampleBuffer(buffer, sampleRate, outRate = 16000) {
+      if (outRate === sampleRate) return buffer;
+      const ratio = sampleRate / outRate;
+      const newLen = Math.round(buffer.length / ratio);
+      const result = new Float32Array(newLen);
+      let offsetResult = 0, offsetBuffer = 0;
+      while (offsetResult < result.length) {
+        const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+        let accum = 0, count = 0;
+        for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+          accum += buffer[i]; count++;
+        }
+        result[offsetResult++] = accum / (count || 1);
+        offsetBuffer = nextOffsetBuffer;
+      }
+      return result;
+    }
+    function rmsLevel(buf) {
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      return Math.sqrt(sum / (buf.length || 1));
+    }
+
+    async function startMic() {
+      if (!ready || !ws || ws.readyState !== 1) throw new Error('לא מחובר');
+      sttReady = false;
+      ws.send(JSON.stringify({ type: 'start_stt' }));
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      });
+      await waitSttReady();
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      source = audioCtx.createMediaStreamSource(stream);
+      processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      silentGain = audioCtx.createGain();
+      silentGain.gain.value = 0;
+      processor.onaudioprocess = (e) => {
+        if (!listening || !ws || ws.readyState !== 1 || playing) return;
+        const input = e.inputBuffer.getChannelData(0);
+        setLevel(Math.min(100, rmsLevel(input) * 400));
+        ws.send(floatTo16BitPCM(downsampleBuffer(input, audioCtx.sampleRate, 16000)));
+      };
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(audioCtx.destination);
+      listening = true;
+      $('micPill').textContent = 'Mic: on';
+      $('micPill').classList.add('on');
+      $('btnMic').textContent = 'עצור שיחה';
+      $('btnMic').classList.add('live');
+      setStage('מאזין');
+      log('mic on');
+    }
+
+    function stopMic() {
+      listening = false;
+      try { processor && processor.disconnect(); } catch {}
+      try { silentGain && silentGain.disconnect(); } catch {}
+      try { source && source.disconnect(); } catch {}
+      try { stream && stream.getTracks().forEach(t => t.stop()); } catch {}
+      try { audioCtx && audioCtx.close(); } catch {}
+      processor = silentGain = source = stream = null;
+      setLevel(0);
+      $('micPill').textContent = 'Mic: off';
+      $('micPill').classList.remove('on');
+      $('btnMic').textContent = 'התחל שיחה (מיקרופון)';
+      $('btnMic').classList.remove('live');
+      setStage('מוכן');
+      log('mic off');
+    }
+
+    async function playWavBase64(b64) {
+      if (!b64 || b64.length < 80) { setErr('אין אודיו'); return; }
+      playing = true;
+      let objectUrl = null;
+      try {
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        if (bytes.length < 2000) { setErr('TTS ריק — נסה שוב'); return; }
+        const blob = new Blob([bytes], { type: 'audio/wav' });
+        objectUrl = URL.createObjectURL(blob);
+        const audio = new Audio(objectUrl);
+        audio.volume = 1;
+        await new Promise((resolve, reject) => {
+          audio.onended = resolve;
+          audio.onerror = () => reject(new Error('play failed'));
+          const p = audio.play();
+          if (p && p.catch) p.catch(reject);
+        });
+      } catch (e) {
+        setErr('ניגון נכשל: ' + e.message);
+      } finally {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        playing = false;
+      }
+    }
+
+    function sendText() {
+      const text = $('textIn').value.trim();
+      if (!text) { setErr('כתוב טקסט'); return; }
+      if (!ready || !ws || ws.readyState !== 1) { setErr('לא מחובר'); return; }
+      setErr('');
+      setStage('מעבד');
+      ws.send(JSON.stringify({ type: 'text', text }));
+      log('text: ' + text);
+    }
+
+    $('btnMic').onclick = async () => {
+      try { if (listening) stopMic(); else await startMic(); }
+      catch (e) { setErr('מיקרופון: ' + e.message); }
+    };
+    $('btnText').onclick = sendText;
+    $('textIn').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); }
+    });
+    $('btnReconnect').onclick = () => {
+      manualClose = true;
+      try { ws && ws.close(); } catch {}
+      setTimeout(() => { manualClose = false; connect(); }, 250);
+    };
+
+    if (/Cursor|Electron/i.test(navigator.userAgent)) {
+      $('cursorWarn').style.display = 'block';
+      setErr('סגור את Cursor ופתח Google Chrome בלבד: http://localhost:8766/');
+      $('btnMic').disabled = true;
+      $('btnText').disabled = true;
+      // אל תתחבר מ-Cursor — הורג את סשן Chrome
+    } else {
+      connect();
+    }
+  </script>
+</body>
+</html>

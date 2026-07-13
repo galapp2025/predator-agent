@@ -1,0 +1,15 @@
+{"message": "starting worker", "level": "INFO", "name": "livekit.agents", "version": "1.6.5", "rtc-version": "1.1.13", "timestamp": "2026-07-13T08:05:54.035907+00:00"}
+{"message": "plugin registered", "level": "INFO", "name": "livekit.agents", "plugin": "livekit.plugins.cartesia", "version": "1.6.5", "timestamp": "2026-07-13T08:05:54.036122+00:00"}
+{"message": "plugin registered", "level": "INFO", "name": "livekit.agents", "plugin": "livekit.plugins.deepgram", "version": "1.6.5", "timestamp": "2026-07-13T08:05:54.036187+00:00"}
+{"message": "plugin registered", "level": "INFO", "name": "livekit.agents", "plugin": "livekit.plugins.openai", "version": "1.6.5", "timestamp": "2026-07-13T08:05:54.036227+00:00"}
+{"message": "plugin registered", "level": "INFO", "name": "livekit.agents", "plugin": "livekit.plugins.silero", "version": "1.6.5", "timestamp": "2026-07-13T08:05:54.036256+00:00"}
+{"message": "HTTP server listening on :8081", "level": "INFO", "name": "livekit.agents", "timestamp": "2026-07-13T08:05:54.039124+00:00"}
+{"message": "initializing process", "level": "INFO", "name": "livekit.agents", "pid": 89243, "timestamp": "2026-07-13T08:05:54.157693+00:00"}
+{"message": "initializing process", "level": "INFO", "name": "livekit.agents", "pid": 89244, "timestamp": "2026-07-13T08:05:54.158467+00:00"}
+{"message": "initializing process", "level": "INFO", "name": "livekit.agents", "pid": 89246, "timestamp": "2026-07-13T08:05:54.158876+00:00"}
+{"message": "initializing process", "level": "INFO", "name": "livekit.agents", "pid": 89245, "timestamp": "2026-07-13T08:05:54.159044+00:00"}
+{"message": "process initialized", "level": "INFO", "name": "livekit.agents", "pid": 89246, "elapsed_time": 2.73, "timestamp": "2026-07-13T08:05:56.889705+00:00"}
+{"message": "process initialized", "level": "INFO", "name": "livekit.agents", "pid": 89243, "elapsed_time": 2.73, "timestamp": "2026-07-13T08:05:56.892233+00:00"}
+{"message": "process initialized", "level": "INFO", "name": "livekit.agents", "pid": 89245, "elapsed_time": 2.76, "timestamp": "2026-07-13T08:05:56.914393+00:00"}
+{"message": "process initialized", "level": "INFO", "name": "livekit.agents", "pid": 89244, "elapsed_time": 2.76, "timestamp": "2026-07-13T08:05:56.919578+00:00"}
+{"message": "registered worker", "level": "INFO", "name": "livekit.agents", "agent_name": "", "deployment": "", "id": "AW_LCWourxnJNzU", "url": "wss://predator-gnzrgpca.livekit.cloud", "region": "Israel", "protocol": 17, "timestamp": "2026-07-13T08:05:57.147068+00:00"}

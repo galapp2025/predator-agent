@@ -1,0 +1,987 @@
+{
+  "הרצל|45-65|female": {
+    "pulls": 1,
+    "arms": [
+      {
+        "persona": "D",
+        "tactic": "micro_yes_ladder",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "micro_yes_ladder",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "loss_aversion",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "loss_aversion",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "loss_aversion",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "loss_aversion",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "loss_aversion",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "social_proof",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "social_proof",
+        "speed": 0.95,
+        "alpha": 2.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "social_proof",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "social_proof",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "social_proof",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "limited_choice",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "limited_choice",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "limited_choice",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "limited_choice",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "limited_choice",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "emotional_time_travel",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "emotional_time_travel",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "emotional_time_travel",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "emotional_time_travel",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "emotional_time_travel",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "debt_creation",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "debt_creation",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "debt_creation",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "debt_creation",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "debt_creation",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "three_cards",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "three_cards",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "three_cards",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "three_cards",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "D",
+        "tactic": "three_cards",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "micro_yes_ladder",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "micro_yes_ladder",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "loss_aversion",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "loss_aversion",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "loss_aversion",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "loss_aversion",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "loss_aversion",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "social_proof",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "social_proof",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "social_proof",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "social_proof",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "social_proof",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "limited_choice",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "limited_choice",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "limited_choice",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "limited_choice",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "limited_choice",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "emotional_time_travel",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "emotional_time_travel",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "emotional_time_travel",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "emotional_time_travel",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "emotional_time_travel",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "debt_creation",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "debt_creation",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "debt_creation",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "debt_creation",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "debt_creation",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "three_cards",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "three_cards",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "three_cards",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "three_cards",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "I",
+        "tactic": "three_cards",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "micro_yes_ladder",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "micro_yes_ladder",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "loss_aversion",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "loss_aversion",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "loss_aversion",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "loss_aversion",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "loss_aversion",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "social_proof",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "social_proof",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "social_proof",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "social_proof",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "social_proof",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "limited_choice",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "limited_choice",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "limited_choice",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "limited_choice",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "limited_choice",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "emotional_time_travel",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "emotional_time_travel",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "emotional_time_travel",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "emotional_time_travel",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "emotional_time_travel",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "debt_creation",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "debt_creation",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "debt_creation",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "debt_creation",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "debt_creation",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "three_cards",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "three_cards",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "three_cards",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "three_cards",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "S",
+        "tactic": "three_cards",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "micro_yes_ladder",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "micro_yes_ladder",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "micro_yes_ladder",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "loss_aversion",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "loss_aversion",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "loss_aversion",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "loss_aversion",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "loss_aversion",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "social_proof",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "social_proof",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "social_proof",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "social_proof",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "social_proof",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "limited_choice",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "limited_choice",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "limited_choice",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "limited_choice",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "limited_choice",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "emotional_time_travel",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "emotional_time_travel",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "emotional_time_travel",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "emotional_time_travel",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "emotional_time_travel",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "debt_creation",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "debt_creation",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "debt_creation",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "debt_creation",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "debt_creation",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "three_cards",
+        "speed": 0.88,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "three_cards",
+        "speed": 0.95,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "three_cards",
+        "speed": 1.0,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "three_cards",
+        "speed": 1.08,
+        "alpha": 1.0,
+        "beta": 1.0
+      },
+      {
+        "persona": "C",
+        "tactic": "three_cards",
+        "speed": 1.15,
+        "alpha": 1.0,
+        "beta": 1.0
+      }
+    ]
+  }
+}

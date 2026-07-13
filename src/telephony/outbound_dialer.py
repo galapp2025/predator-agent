@@ -78,6 +78,19 @@ class LeadLoader:
         logger.info(f"Loaded {len(leads)} leads from {self.csv_path}")
         return leads
 
+    def load_sorted_by_persuadability(self, campaign_type: str = "primaries") -> List[Dict]:
+        """מיון DESC לפי persuadability לפני חיוג."""
+        from ..scoring.persuadability import score_leads
+
+        leads = self.load()
+        scored = score_leads(leads, campaign_type=campaign_type)
+        out = []
+        for item in scored:
+            row = dict(item.lead)
+            row["persuadability"] = item.score
+            out.append(row)
+        return out
+
     def load_by_branch(self, branch: str) -> List[Dict]:
         return [l for l in self.load() if l.get("registered_branch") == branch]
 
@@ -141,33 +154,122 @@ class OutboundDialer:
 
     async def dial_lead(self, lead: Dict) -> Optional[CallRecord]:
         if not self.is_working_hours():
-            return None
+            # ב-dev מאפשרים דיאל גם מחוץ לשעות אם DIALER_FORCE=1
+            if os.getenv("DIALER_FORCE", "").lower() not in ("1", "true", "yes"):
+                return None
         async with self._semaphore:
             await self._rate_limit()
             record = self.build_call_record(lead)
             logger.info(
                 f"[{record.session_id}] dialing {record.full_name} "
                 f"<{record.phone}> addr={record.address} branch={record.registered_branch} "
-                f"support={record.support_score:.2f}"
+                f"support={record.support_score:.2f} score={lead.get('persuadability', 'n/a')}"
             )
+
+            # תור + session אצל הסוכן
+            if self.queue is not None:
+                try:
+                    self.queue.enqueue_outbound(lead)
+                except Exception as e:
+                    logger.warning("queue enqueue failed: %s", e)
+
+            if self.agent is not None:
+                try:
+                    from ..enrichment.voter_context import VoterContextBuilder
+
+                    ctx = VoterContextBuilder().build(
+                        first_name=lead.get("first_name", ""),
+                        last_name=lead.get("last_name", ""),
+                        city=lead.get("city", ""),
+                        street=lead.get("street", ""),
+                        house_number=lead.get("house_number", ""),
+                        registered_branch=lead.get("registered_branch", ""),
+                        support_score=float(lead.get("support_score") or 0.5),
+                    )
+                    self.agent.create_session(
+                        record.session_id, voter_context=ctx, phone=lead.get("phone", "")
+                    )
+                    record.result = "session_ready"
+                except Exception as e:
+                    logger.error("create_session failed: %s", e)
+                    record.result = "session_error"
+
+            # SIP אמיתי אם מוגדר
+            if os.getenv("TWILIO_ACCOUNT_SID") and os.getenv("ENABLE_SIP_DIAL", "").lower() in (
+                "1",
+                "true",
+                "yes",
+            ):
+                try:
+                    from .sip_manager import SIPManager
+
+                    webhook = os.getenv("SIP_CALL_WEBHOOK_URL", "")
+                    if not webhook:
+                        raise RuntimeError("SIP_CALL_WEBHOOK_URL required for SIP dial")
+                    sip = SIPManager()
+                    sip.make_call(lead["phone"], webhook)
+                    record.result = "dialed"
+                except Exception as e:
+                    logger.error("SIP dial failed: %s", e)
+                    record.result = "sip_error"
             return record
 
     async def batch_dial(self, leads: Optional[List[Dict]] = None) -> List[CallRecord]:
-        leads = leads if leads is not None else self.loader.load()
+        leads = leads if leads is not None else self.loader.load_sorted_by_persuadability()
         results = []
         for lead in leads:
-            if not self.is_working_hours():
-                break
             record = await self.dial_lead(lead)
             if record:
                 results.append(record)
         return results
 
     async def run_campaign_from_csv(self) -> List[CallRecord]:
-        leads = self.loader.load()
-        logger.info(f"Starting outbound campaign: {len(leads)} leads")
+        """Pipeline: Scoring ממיין → Dial/Session → WhatsApp (אחרי end_session אם יש agent)."""
+        from ..channels.whatsapp_followup import WhatsAppFollowup
+
+        leads = self.loader.load_sorted_by_persuadability()
+        logger.info(
+            "Starting outbound campaign: %s leads (sorted by persuadability)",
+            len(leads),
+        )
+        if leads:
+            logger.info(
+                "Top lead: %s score=%.3f",
+                leads[0].get("full_name"),
+                float(leads[0].get("persuadability") or 0),
+            )
         records = await self.batch_dial(leads)
         self.save_history(records)
+
+        dry = os.getenv("WHATSAPP_DRY_RUN", "true").lower() in ("1", "true", "yes")
+        wa = WhatsAppFollowup()
+        for rec in records:
+            if self.agent is not None and rec.session_id in getattr(
+                self.agent, "active_sessions", {}
+            ):
+                try:
+                    ended = await self.agent.end_session(
+                        rec.session_id,
+                        outcome=rec.result or "answered",
+                        duration_seconds=0,
+                        send_whatsapp=True,
+                        dry_run_whatsapp=dry,
+                    )
+                    rec.result = ended.get("final_state", rec.result)
+                    rec.notes = str((ended.get("report") or {}).get("commitment", ""))
+                except Exception as e:
+                    logger.error("end_session failed: %s", e)
+            else:
+                wa.maybe_send_after_call(
+                    {
+                        "phone": rec.phone,
+                        "full_name": rec.full_name,
+                        "final_state": "closing",
+                        "persona": "S",
+                        "resistance": "low",
+                    },
+                    dry_run=dry,
+                )
         return records
 
     def save_history(self, records: List[CallRecord]):

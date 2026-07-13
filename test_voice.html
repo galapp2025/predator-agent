@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Predator Live Voice</title>
+  <style>
+    :root {
+      --bg: #0e151c; --card: #17212b; --line: #2a3b4d; --text: #e8eef6;
+      --muted: #8fa3b8; --accent: #2ec4b6; --warn: #f4a261; --bad: #e76f51;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: "Segoe UI", Arial, sans-serif; color: var(--text);
+      background: radial-gradient(1200px 600px at 80% -10%, #1b3350 0%, var(--bg) 55%);
+      min-height: 100vh;
+    }
+    header {
+      padding: 22px 28px; border-bottom: 1px solid var(--line);
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    }
+    h1 { margin: 0; font-size: 1.35rem; }
+    .sub { color: var(--muted); font-size: .9rem; margin-top: 4px; }
+    main { display: grid; grid-template-columns: 340px 1fr; gap: 16px; padding: 18px 28px 40px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
+    button {
+      width: 100%; border: 0; border-radius: 12px; padding: 14px 16px;
+      font-weight: 700; font-size: 1rem; cursor: pointer; margin-top: 10px;
+    }
+    button:disabled { opacity: .45; cursor: not-allowed; }
+    #btnMic { background: var(--accent); color: #042a27; }
+    #btnMic.live { background: var(--bad); color: #fff; }
+    #btnText, #btnReconnect { background: #243447; color: var(--text); }
+    input, textarea {
+      width: 100%; background: #0f1822; border: 1px solid var(--line); color: var(--text);
+      border-radius: 10px; padding: 10px 12px; margin-top: 8px;
+    }
+    .pill { display: inline-block; padding: 3px 10px; border-radius: 999px; background: #243447; font-size: .78rem; margin-left: 6px; }
+    .pill.on { background: #1f4d45; color: var(--accent); }
+    .pill.bad { background: #4a2218; color: #ffb4a2; }
+    .row { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: .88rem; margin: 8px 0; }
+    .flow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 14px; }
+    .stage {
+      background: #101924; border: 1px solid var(--line); border-radius: 12px;
+      padding: 10px; text-align: center; font-size: .78rem; color: var(--muted);
+    }
+    .stage.active { border-color: var(--accent); color: var(--accent); }
+    pre {
+      white-space: pre-wrap; background: #101924; border-radius: 12px; padding: 12px;
+      border: 1px solid var(--line); min-height: 120px; font-size: .9rem; line-height: 1.45;
+    }
+    .log { max-height: 280px; overflow: auto; font-size: .8rem; color: var(--muted); }
+    .err { color: #ffb4a2; margin-top: 8px; min-height: 1.2em; font-size: .85rem; }
+    .warn-banner {
+      display: none; margin: 12px 28px 0; padding: 12px 14px; border-radius: 12px;
+      background: #3a2a12; border: 1px solid #8a6230; color: #ffd9a0; font-size: .9rem;
+    }
+    .meter {
+      height: 10px; background: #0f1822; border-radius: 999px; overflow: hidden; margin-top: 10px;
+      border: 1px solid var(--line);
+    }
+    .meter > span {
+      display: block; height: 100%; width: 0%; background: var(--accent); transition: width 60ms linear;
+    }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="warn-banner" id="cursorWarn">
+    נפתח בתוך Cursor — המיקרופון לרוב לא עובד כאן.
+    פתח ב־Chrome/Safari: <code>http://localhost:8765/</code>
+  </div>
+  <header>
+    <div>
+      <h1>Predator Live Voice</h1>
+      <div class="sub">מיקרופון → Deepgram → Predator → Groq/OpenAI → Cartesia Sonic-3</div>
+    </div>
+    <div>
+      <span class="pill" id="wsPill">WS: off</span>
+      <span class="pill" id="micPill">Mic: off</span>
+      <span class="pill" id="readyPill">Session: —</span>
+    </div>
+  </header>
+
+  <main>
+    <aside class="card">
+      <div class="row"><span>Session</span><span id="sid">—</span></div>
+      <div class="row"><span>Status</span><span id="status">מחבר…</span></div>
+      <button id="btnMic" disabled>התחל האזנה</button>
+      <div class="meter" title="עוצמת מיקרופון"><span id="levelBar"></span></div>
+      <div class="row"><span>רמת מיק</span><span id="levelTxt">0%</span></div>
+      <label class="sub">בדיקה בטקסט (בלי מיקרופון)</label>
+      <textarea id="textIn" rows="3" placeholder="כתוב כאן בעברית…" disabled></textarea>
+      <button id="btnText" disabled>שלח טקסט</button>
+      <button id="btnReconnect">התחבר מחדש</button>
+      <div class="err" id="errBox"></div>
+      <p class="sub" style="margin-top:14px">פתח רק דרך <code>http://localhost:8765/</code> בדפדפן רגיל (לא בתוך Cursor).</p>
+    </aside>
+
+    <section>
+      <div class="flow" id="flow">
+        <div class="stage" data-s="mic">🎤 Mic</div>
+        <div class="stage" data-s="stt">Deepgram STT</div>
+        <div class="stage" data-s="predator">Predator</div>
+        <div class="stage" data-s="llm">OpenAI LLM</div>
+        <div class="stage" data-s="tts">Cartesia TTS</div>
+      </div>
+      <div class="card" style="margin-bottom:12px">
+        <div class="row"><strong>Pipeline חי</strong><span id="metaPills"></span></div>
+        <div class="row"><span>STT</span><span id="sttOut">—</span></div>
+        <div class="row"><span>DISC / State / Tactic</span><span id="pipeOut">—</span></div>
+        <div class="row"><span>Persona / Resistance</span><span id="persOut">—</span></div>
+        <h3 style="margin:10px 0 6px;font-size:1rem">תשובת הסוכן</h3>
+        <pre id="llmOut">ממתין לחיבור…</pre>
+      </div>
+      <div class="card"><strong>לוג</strong><div class="log" id="log"></div></div>
+    </section>
+  </main>
+
+  <script>
+    const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') +
+      (location.host || 'localhost:8765') + '/ws';
+
+    const $ = (id) => document.getElementById(id);
+    let ws, audioCtx, processor, source, silentGain, stream;
+    let listening = false, playing = false, ready = false, reconnecting = false;
+    let sttReady = false, sttWaitResolve = null;
+
+    if (/Cursor|Electron/i.test(navigator.userAgent)) {
+      $('cursorWarn').style.display = 'block';
+    }
+
+    function log(msg) {
+      const t = new Date().toLocaleTimeString();
+      $('log').textContent = `[${t}] ${msg}\n` + $('log').textContent;
+    }
+    function setErr(msg) { $('errBox').textContent = msg || ''; }
+    function setEnabled(on) {
+      $('btnMic').disabled = !on;
+      $('btnText').disabled = !on;
+      $('textIn').disabled = !on;
+    }
+    function setStage(name) {
+      document.querySelectorAll('.stage').forEach(el => {
+        el.classList.toggle('active', el.dataset.s === name);
+      });
+      if (name === 'idle') document.querySelectorAll('.stage').forEach(el => el.classList.remove('active'));
+      $('status').textContent = name;
+    }
+    function setLevel(pct) {
+      $('levelBar').style.width = pct + '%';
+      $('levelTxt').textContent = Math.round(pct) + '%';
+    }
+    function waitSttReady(ms = 12000) {
+      if (sttReady) return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        const t = setTimeout(() => {
+          sttWaitResolve = null;
+          reject(new Error('Deepgram לא עלה בזמן'));
+        }, ms);
+        sttWaitResolve = () => { clearTimeout(t); resolve(); };
+      });
+    }
+
+    function connect() {
+      if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
+      ready = false;
+      sttReady = false;
+      setEnabled(false);
+      setErr('');
+      $('status').textContent = 'מחבר…';
+      ws = new WebSocket(WS_URL);
+      ws.binaryType = 'arraybuffer';
+
+      ws.onopen = () => {
+        $('wsPill').textContent = 'WS: on';
+        $('wsPill').classList.add('on');
+        log('connected ' + WS_URL);
+        ws.send(JSON.stringify({
+          type: 'start',
+          voter: {
+            first_name: 'רחל', last_name: 'לוי',
+            city: 'פתח תקווה', street: 'הרצל', house_number: '12',
+            support_score: 0.62, phone: '0501234567'
+          }
+        }));
+      };
+      ws.onclose = () => {
+        $('wsPill').textContent = 'WS: off';
+        $('wsPill').classList.remove('on');
+        $('readyPill').textContent = 'Session: —';
+        ready = false;
+        sttReady = false;
+        setEnabled(false);
+        if (listening) stopMic();
+        log('disconnected');
+        $('status').textContent = 'מנותק';
+        if (!reconnecting) {
+          reconnecting = true;
+          setTimeout(() => { reconnecting = false; connect(); }, 1500);
+        }
+      };
+      ws.onerror = () => { log('WS error'); setErr('שגיאת WebSocket'); };
+      ws.onmessage = async (ev) => {
+        if (typeof ev.data !== 'string') return;
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+
+        if (msg.type === 'ready') {
+          ready = true;
+          $('sid').textContent = msg.session_id;
+          $('readyPill').textContent = 'Session: ready';
+          $('readyPill').classList.add('on');
+          setEnabled(true);
+          setStage('idle');
+          $('llmOut').textContent = 'מחובר. אפשר לשלוח טקסט או לפתוח מיקרופון.';
+          log('session ready ' + msg.session_id);
+        } else if (msg.type === 'stt_ready' || (msg.type === 'stt_status' && msg.ok)) {
+          sttReady = true;
+          if (sttWaitResolve) { sttWaitResolve(); sttWaitResolve = null; }
+          $('micPill').classList.add('on');
+          log('Deepgram STT ready');
+        } else if (msg.type === 'stt_status' && !msg.ok) {
+          setErr('Deepgram לא התחבר — נסה שוב או השתמש בטקסט');
+        } else if (msg.type === 'mic_stats') {
+          log('server got audio chunks=' + msg.chunks + ' bytes=' + msg.bytes);
+        } else if (msg.type === 'transcript') {
+          setStage('stt');
+          $('sttOut').textContent = msg.text + (msg.is_final ? '' : ' …');
+        } else if (msg.type === 'status') {
+          setStage(msg.stage || 'idle');
+        } else if (msg.type === 'pipeline') {
+          $('sttOut').textContent = msg.stt || '—';
+          $('pipeOut').textContent = `${msg.disc || '—'} / ${msg.state || '—'} / ${msg.tactic || '—'}`;
+          $('persOut').textContent = `${msg.persona || '—'} / ${msg.resistance || '—'}`;
+          $('llmOut').textContent = msg.llm || '';
+          $('metaPills').innerHTML =
+            (msg.battle ? '<span class="pill bad">BATTLE</span>' : '') +
+            (msg.whisper ? '<span class="pill on">WHISPER</span>' : '') +
+            (msg.forced ? '<span class="pill on">FORCED</span>' : '');
+        } else if (msg.type === 'audio') {
+          setStage('tts');
+          setErr('');
+          log('מנגן תשובה… (' + (msg.text || '').slice(0, 40) + ')');
+          await playWavBase64(msg.data);
+          setStage('idle');
+        } else if (msg.type === 'session_ended') {
+          log('session ended: ' + JSON.stringify(msg.result || {}));
+        } else if (msg.type === 'error') {
+          setErr(msg.message || 'שגיאה');
+          log('ERROR: ' + msg.message);
+          setStage('idle');
+        }
+      };
+    }
+
+    function floatTo16BitPCM(float32Array) {
+      const buffer = new ArrayBuffer(float32Array.length * 2);
+      const view = new DataView(buffer);
+      for (let i = 0; i < float32Array.length; i++) {
+        let s = Math.max(-1, Math.min(1, float32Array[i]));
+        view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+      }
+      return buffer;
+    }
+    function downsampleBuffer(buffer, sampleRate, outRate = 16000) {
+      if (outRate === sampleRate) return buffer;
+      const ratio = sampleRate / outRate;
+      const newLen = Math.round(buffer.length / ratio);
+      const result = new Float32Array(newLen);
+      let offsetResult = 0, offsetBuffer = 0;
+      while (offsetResult < result.length) {
+        const nextOffsetBuffer = Math.round((offsetResult + 1) * ratio);
+        let accum = 0, count = 0;
+        for (let i = offsetBuffer; i < nextOffsetBuffer && i < buffer.length; i++) {
+          accum += buffer[i]; count++;
+        }
+        result[offsetResult++] = accum / (count || 1);
+        offsetBuffer = nextOffsetBuffer;
+      }
+      return result;
+    }
+    function rmsLevel(buf) {
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      return Math.sqrt(sum / (buf.length || 1));
+    }
+
+    async function startMic() {
+      if (!ready || !ws || ws.readyState !== 1) throw new Error('WebSocket לא מוכן');
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('הדפדפן לא תומך במיקרופון — פתח ב-Chrome');
+      }
+
+      sttReady = false;
+      ws.send(JSON.stringify({ type: 'start_stt' }));
+
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+
+      try {
+        await waitSttReady();
+      } catch (e) {
+        stream.getTracks().forEach(t => t.stop());
+        throw e;
+      }
+
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
+      if (audioCtx.state === 'suspended') await audioCtx.resume();
+      source = audioCtx.createMediaStreamSource(stream);
+      // ScriptProcessor חייב להיות מחובר לגרף — אבל בלי להשמיע למיק (מונע ביטול הד)
+      processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      silentGain = audioCtx.createGain();
+      silentGain.gain.value = 0;
+
+      let sent = 0;
+      processor.onaudioprocess = (e) => {
+        if (!listening || !ws || ws.readyState !== 1) return;
+        const input = e.inputBuffer.getChannelData(0);
+        const level = Math.min(100, rmsLevel(input) * 400);
+        setLevel(level);
+        // בזמן ניגון TTS — לא שולחים מיק בכלל (מונע הד + תורות כפולים)
+        if (playing) return;
+        const down = downsampleBuffer(input, audioCtx.sampleRate, 16000);
+        if (ws.readyState === 1) {
+          ws.send(floatTo16BitPCM(down));
+          sent++;
+          if (sent === 1 || sent % 40 === 0) log('mic frames sent=' + sent + ' sr=' + audioCtx.sampleRate);
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(audioCtx.destination);
+
+      listening = true;
+      $('micPill').textContent = 'Mic: on';
+      $('micPill').classList.add('on');
+      $('btnMic').textContent = 'עצור האזנה';
+      $('btnMic').classList.add('live');
+      setStage('mic');
+      log('microphone started sr=' + audioCtx.sampleRate);
+    }
+
+    function stopMic() {
+      listening = false;
+      try { processor && processor.disconnect(); } catch {}
+      try { silentGain && silentGain.disconnect(); } catch {}
+      try { source && source.disconnect(); } catch {}
+      try { stream && stream.getTracks().forEach(t => t.stop()); } catch {}
+      try { audioCtx && audioCtx.close(); } catch {}
+      processor = silentGain = source = stream = null;
+      setLevel(0);
+      $('micPill').textContent = 'Mic: off';
+      $('micPill').classList.remove('on');
+      $('btnMic').textContent = 'התחל האזנה';
+      $('btnMic').classList.remove('live');
+      setStage('idle');
+      log('microphone stopped');
+    }
+
+    async function playWavBase64(b64) {
+      if (!b64 || b64.length < 80) {
+        setErr('אין אודיו מהשרת — נסה שוב');
+        return;
+      }
+      playing = true;
+      let objectUrl = null;
+      try {
+        const bin = atob(b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        // אם האודיו קצר מדי (~silence) — אל תנגן בשקט
+        if (bytes.length < 2000) {
+          setErr('TTS החזיר שקט — Cartesia עמוס. לחץ שוב בעוד שנייה.');
+          log('audio too small: ' + bytes.length);
+          return;
+        }
+        const blob = new Blob([bytes], { type: 'audio/wav' });
+        objectUrl = URL.createObjectURL(blob);
+        const audio = new Audio(objectUrl);
+        audio.volume = 1.0;
+        await new Promise((resolve, reject) => {
+          audio.onended = resolve;
+          audio.onerror = () => reject(new Error('HTMLAudio play failed'));
+          const p = audio.play();
+          if (p && p.catch) p.catch(reject);
+        });
+        log('playback done');
+      } catch (e) {
+        log('play error: ' + e.message);
+        // fallback AudioContext
+        try {
+          const bin = atob(b64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          if (ctx.state === 'suspended') await ctx.resume();
+          const audioBuffer = await ctx.decodeAudioData(bytes.buffer.slice(0));
+          const src = ctx.createBufferSource();
+          src.buffer = audioBuffer;
+          src.connect(ctx.destination);
+          await new Promise((resolve) => { src.onended = resolve; src.start(); });
+          await ctx.close();
+        } catch (e2) {
+          setErr('ניגון נכשל: ' + e2.message + ' — בדוק שעוצמת הדפדפן פתוחה');
+        }
+      } finally {
+        if (objectUrl) URL.revokeObjectURL(objectUrl);
+        playing = false;
+      }
+    }
+
+    function sendText() {
+      const text = $('textIn').value.trim();
+      if (!text) { setErr('כתוב טקסט קודם'); return; }
+      if (!ready || !ws || ws.readyState !== 1) { setErr('אין חיבור — לחץ התחבר מחדש'); return; }
+      setErr('');
+      setStage('predator');
+      ws.send(JSON.stringify({ type: 'text', text }));
+      log('sent text: ' + text);
+    }
+
+    $('btnMic').onclick = async () => {
+      try {
+        if (listening) stopMic();
+        else await startMic();
+      } catch (e) {
+        log('mic error: ' + e.message);
+        setErr('מיקרופון: ' + e.message + ' — פתח ב-Chrome: http://localhost:8765/');
+      }
+    };
+    $('btnText').onclick = sendText;
+    $('textIn').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); }
+    });
+    $('btnReconnect').onclick = () => {
+      reconnecting = false;
+      try { ws && ws.close(); } catch {}
+      setTimeout(connect, 200);
+    };
+
+    connect();
+  </script>
+</body>
+</html>
