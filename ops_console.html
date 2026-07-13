@@ -74,6 +74,18 @@
     <aside class="card">
       <div class="row"><span>Session</span><span id="sid">—</span></div>
       <div class="row"><span>Status</span><span id="status">מחבר…</span></div>
+      <div class="row"><span>סוכן</span><span id="agentOut">—</span></div>
+      <div class="row"><span>בוחר/ת</span><span id="voterOut">—</span></div>
+      <label class="sub">שם פרטי (מי מדבר)</label>
+      <input id="voterFirst" value="רחל" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0d141d;color:var(--text)" />
+      <label class="sub">שם משפחה</label>
+      <input id="voterLast" value="לוי" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0d141d;color:var(--text)" />
+      <label class="sub">מגדר</label>
+      <select id="voterGender" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0d141d;color:var(--text)">
+        <option value="female" selected>נקבה — את / שלך</option>
+        <option value="male">זכר — אתה / שלך</option>
+        <option value="">לפי השם</option>
+      </select>
       <button id="btnMic" disabled>התחל שיחה (מיקרופון)</button>
       <div class="meter"><span id="levelBar"></span></div>
       <div class="row"><span>רמת מיק</span><span id="levelTxt">0%</span></div>
@@ -99,6 +111,8 @@
     let ws, audioCtx, processor, source, silentGain, stream;
     let listening = false, playing = false, ready = false;
     let sttReady = false, sttWaitResolve = null, manualClose = false;
+    let audioChain = Promise.resolve();
+    let currentAudio = null;
 
     if (/Cursor|Electron/i.test(navigator.userAgent)) $('cursorWarn').style.display = 'block';
 
@@ -124,6 +138,55 @@
       });
     }
 
+    function stopPlayback() {
+      try { if (currentAudio) { currentAudio.pause(); currentAudio.src = ''; } } catch {}
+      currentAudio = null;
+      playing = false;
+      audioChain = Promise.resolve();
+    }
+
+    function enqueueAudio(b64) {
+      audioChain = audioChain.then(() => playWavBase64(b64)).catch(() => {});
+      return audioChain;
+    }
+
+    /** דיבור מקומי מהיר — יעד לייטנסי <1s (בלי המתנה ל-OpenAI TTS) */
+    let heVoice = null;
+    function pickHebrewVoice() {
+      try {
+        const voices = window.speechSynthesis ? window.speechSynthesis.getVoices() : [];
+        heVoice = voices.find(v => /he(-|_)?IL/i.test(v.lang))
+          || voices.find(v => /^he/i.test(v.lang))
+          || voices.find(v => /hebrew|עברית/i.test(v.name))
+          || null;
+      } catch { heVoice = null; }
+    }
+    if (window.speechSynthesis) {
+      pickHebrewVoice();
+      window.speechSynthesis.onvoiceschanged = pickHebrewVoice;
+    }
+
+    function speakLocal(text, lang) {
+      return new Promise((resolve) => {
+        try {
+          if (!window.speechSynthesis || !text) { resolve(); return; }
+          window.speechSynthesis.cancel();
+          const u = new SpeechSynthesisUtterance(text);
+          u.lang = lang || 'he-IL';
+          if (heVoice) u.voice = heVoice;
+          u.rate = 1.08;
+          u.pitch = 1.0;
+          u.volume = 1.0;
+          playing = true;
+          u.onend = () => { playing = false; resolve(); };
+          u.onerror = () => { playing = false; resolve(); };
+          window.speechSynthesis.speak(u);
+        } catch { playing = false; resolve(); }
+      });
+    }
+
+    function playLocalAck(_text) {}
+
     function connect() {
       if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
       ready = false; sttReady = false; setEnabled(false); setErr('');
@@ -134,10 +197,14 @@
         $('wsPill').textContent = 'WS: on';
         $('wsPill').classList.add('on');
         log('connected');
+        const gender = $('voterGender').value;
         ws.send(JSON.stringify({
           type: 'start',
           voter: {
-            first_name: 'רחל', last_name: 'לוי', city: 'פתח תקווה',
+            first_name: ($('voterFirst').value || 'רחל').trim(),
+            last_name: ($('voterLast').value || '').trim(),
+            gender: gender,
+            city: 'פתח תקווה',
             street: 'הרצל', house_number: '12', support_score: 0.62, phone: '0501234567'
           }
         }));
@@ -148,10 +215,10 @@
         $('readyPill').textContent = 'OPS: —';
         $('readyPill').classList.remove('on');
         ready = false; setEnabled(false);
+        stopPlayback();
         if (listening) stopMic();
         setStage('מנותק');
         log('disconnected');
-        // אין auto-reconnect — מונע הצפת סשנים
         if (!manualClose) setErr('נותק. לחץ «התחבר מחדש».');
       };
       ws.onerror = () => { setErr('שגיאת WebSocket'); };
@@ -165,26 +232,54 @@
           $('readyPill').classList.add('on');
           setEnabled(true);
           setStage('מוכן');
-          $('llmOut').textContent = 'מערכת חיה. לחץ מיקרופון או שלח טקסט.';
-          log('session ' + msg.session_id);
+          const ag = msg.agent_name || '—';
+          const vn = msg.voter_name || ($('voterFirst').value || '—');
+          const vg = msg.voter_gender === 'female' ? 'נקבה' : (msg.voter_gender === 'male' ? 'זכר' : '');
+          $('agentOut').textContent = ag;
+          $('voterOut').textContent = vg ? `${vn} · ${vg}` : vn;
+          $('llmOut').textContent = `מערכת חיה. מדבר/ת: ${ag} → ${vn}. לחץ מיקרופון.`;
+          log('session ' + msg.session_id + ' agent=' + ag + ' voter=' + vn);
         } else if (msg.type === 'stt_ready' || (msg.type === 'stt_status' && msg.ok)) {
           sttReady = true;
           if (sttWaitResolve) { sttWaitResolve(); sttWaitResolve = null; }
           log('STT ready');
         } else if (msg.type === 'transcript') {
-          setStage('STT');
-          $('sttOut').textContent = msg.text + (msg.is_final ? '' : ' …');
+          // רק finals — בלי הבהוב תמלול חלקי ששובר את תחושת השיחה
+          if (msg.is_final) {
+            setStage('שומע');
+            $('sttOut').textContent = msg.text;
+          }
+        } else if (msg.type === 'speak_local') {
+          setStage('מדבר');
+          setErr('');
+          $('llmOut').textContent = msg.text || $('llmOut').textContent;
+          if (msg.latency_ms != null) {
+            $('pipeOut').textContent = ( $('pipeOut').textContent.split(' · ')[0] || '—' ) + ' · ' + msg.latency_ms + 'ms';
+          }
+          stopPlayback();
+          speakLocal(msg.text, msg.lang).then(() => {
+            setStage('מוכן');
+            try { ws && ws.readyState === 1 && ws.send(JSON.stringify({ type: 'playback_done' })); } catch {}
+          });
+        } else if (msg.type === 'ack') {
+          // ignored
+        } else if (msg.type === 'barge_in') {
+          try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
+          stopPlayback();
+          setStage('מאזין');
         } else if (msg.type === 'status') {
           setStage(msg.stage || msg.detail || '…');
         } else if (msg.type === 'pipeline') {
           $('sttOut').textContent = msg.stt || '—';
-          $('pipeOut').textContent = `${msg.disc || '—'} / ${msg.state || '—'}`;
+          $('pipeOut').textContent = `${msg.disc || '—'} / ${msg.state || '—'}${msg.latency_ms != null ? ' · ' + msg.latency_ms + 'ms' : ''}`;
           $('llmOut').textContent = msg.llm || '';
         } else if (msg.type === 'audio') {
-          setStage('TTS');
+          setStage('מדבר');
           setErr('');
-          await playWavBase64(msg.data);
-          setStage('מוכן');
+          enqueueAudio(msg.data).then(() => {
+            setStage('מוכן');
+            try { ws && ws.readyState === 1 && ws.send(JSON.stringify({ type: 'playback_done' })); } catch {}
+          });
         } else if (msg.type === 'error') {
           setErr(msg.message || 'שגיאה');
           log('ERROR ' + msg.message);
@@ -229,20 +324,22 @@
 
     async function startMic() {
       if (!ready || !ws || ws.readyState !== 1) throw new Error('לא מחובר');
+      setErr('');
       sttReady = false;
       ws.send(JSON.stringify({ type: 'start_stt' }));
       stream = await navigator.mediaDevices.getUserMedia({
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true }
       });
-      await waitSttReady();
       audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 48000 });
       if (audioCtx.state === 'suspended') await audioCtx.resume();
       source = audioCtx.createMediaStreamSource(stream);
       processor = audioCtx.createScriptProcessor(4096, 1, 1);
       silentGain = audioCtx.createGain();
       silentGain.gain.value = 0;
+      listening = true; // מתחילים לשלוח מיד (באפר בשרת עד ש-DG עולה)
       processor.onaudioprocess = (e) => {
-        if (!listening || !ws || ws.readyState !== 1 || playing) return;
+        // שולחים תמיד בזמן האזנה — גם בזמן TTS (barge-in + מונע 'תקיעת' STT)
+        if (!listening || !ws || ws.readyState !== 1) return;
         const input = e.inputBuffer.getChannelData(0);
         setLevel(Math.min(100, rmsLevel(input) * 400));
         ws.send(floatTo16BitPCM(downsampleBuffer(input, audioCtx.sampleRate, 16000)));
@@ -250,13 +347,19 @@
       source.connect(processor);
       processor.connect(silentGain);
       silentGain.connect(audioCtx.destination);
-      listening = true;
       $('micPill').textContent = 'Mic: on';
       $('micPill').classList.add('on');
       $('btnMic').textContent = 'עצור שיחה';
       $('btnMic').classList.add('live');
       setStage('מאזין');
       log('mic on');
+      try {
+        await waitSttReady(15000);
+        log('STT ready');
+      } catch (e) {
+        setErr('Deepgram איטי — ממשיכים; אם אין תמלול רענן ונסה שוב');
+        log('STT wait: ' + e.message);
+      }
     }
 
     function stopMic() {
@@ -288,6 +391,7 @@
         const blob = new Blob([bytes], { type: 'audio/wav' });
         objectUrl = URL.createObjectURL(blob);
         const audio = new Audio(objectUrl);
+        currentAudio = audio;
         audio.volume = 1;
         await new Promise((resolve, reject) => {
           audio.onended = resolve;
@@ -296,9 +400,10 @@
           if (p && p.catch) p.catch(reject);
         });
       } catch (e) {
-        setErr('ניגון נכשל: ' + e.message);
+        if (e && e.name !== 'AbortError') setErr('ניגון נכשל: ' + e.message);
       } finally {
         if (objectUrl) URL.revokeObjectURL(objectUrl);
+        if (currentAudio) currentAudio = null;
         playing = false;
       }
     }

@@ -155,7 +155,7 @@ class VoterContextBuilder:
         all_voters=None,
         **kwargs,
     ) -> VoterContext:
-        # Allow dict-style voter payload
+        gender = kwargs.get("gender") or ""
         if isinstance(first_name, dict):
             v = first_name
             first_name = v.get("first_name", "")
@@ -167,8 +167,15 @@ class VoterContextBuilder:
             support_score = float(v.get("support_score", 0.5) or 0.5)
             campaign_type = v.get("campaign_type", "primaries")
             all_voters = v.get("all_voters", all_voters)
+            gender = v.get("gender") or gender
 
-        gender = self.detect_gender(first_name)
+        gender_norm = str(gender or "").strip().lower()
+        if gender_norm in ("female", "f", "נקבה", "אישה", "אשה"):
+            gender = "female"
+        elif gender_norm in ("male", "m", "זכר", "גבר"):
+            gender = "male"
+        else:
+            gender = self.detect_gender(first_name)
         age_group = self.detect_age_group(first_name)
         ethnic_hint = self.detect_ethnic_hint(last_name, first_name)
         geo_anomaly = self.check_geo_anomaly(registered_branch, city)
@@ -193,32 +200,18 @@ class VoterContextBuilder:
         )
 
     def to_prompt_context(self, ctx: VoterContext) -> str:
-        lines = ["[VOTER_CONTEXT — מידע מודיעיני מקדים]"]
-        lines.append(f"שם: {ctx.first_name} {ctx.last_name}")
         gender_he = {"male": "זכר", "female": "נקבה", "unknown": "לא ידוע"}
-        lines.append(f"מין: {gender_he.get(ctx.gender, 'לא ידוע')}")
-        lines.append(f"קבוצת גיל משוערת: {ctx.age_group}")
-        lines.append(f"נפשות בתא משפחתי: {ctx.household_members}")
-        lines.append(f"עיר מגורים: {ctx.city}")
-        if ctx.ethnic_hint != "general":
-            ethnic_he = {
-                "ethiopian": "יוצאי אתיופיה — חם, משפחתי",
-                "russian": "יוצאי בריה״מ — ישיר, מעשי",
-            }
-            lines.append(f"רמז עדתי: {ethnic_he.get(ctx.ethnic_hint, ctx.ethnic_hint)}")
-        lines.append(f"ציון תמיכה צפוי: {ctx.support_score:.2f}")
-        if ctx.support_score > 0.7:
-            lines.append("  → תומך בטוח. אסטרטגיה: GOTV — המרצה.")
-        elif ctx.support_score < 0.3:
-            lines.append("  → לא תומך. אסטרטגיה: SCREENING.")
+        if ctx.gender == "female":
+            address = "פנה רק בנקבה: את / שלך / לך / אותך. אסור אתה/לך הזכרי."
+        elif ctx.gender == "male":
+            address = "פנה רק בזכר: אתה / שלך / לך / אותך. אסור את/לך הנקבי."
         else:
-            lines.append("  → קול צף. אסטרטגיה: FULL_PERSUASION.")
-        if ctx.geo_anomaly:
-            lines.append("⚠️ חריגה גאוגרפית: גר בעיר אחרת מהסניף")
-            if ctx.campaign_type == "primaries":
-                lines.append("   → בפריימריז: נכס. קשר חזק לסניף.")
-            elif ctx.campaign_type == "municipal":
-                lines.append("   → במוניציפלי: כנראה לא רלוונטי.")
-        if ctx.street:
-            lines.append(f"רחוב: {ctx.street} {ctx.house_number}")
-        return "\n".join(lines)
+            address = "מגדר לא ידוע — הימנע מאתה/את; השתמש בשם או בניסוח ניטרלי."
+        lines = [
+            f"שם הבוחר: {ctx.first_name}".strip(),
+            f"משפחה: {ctx.last_name}" if ctx.last_name else "",
+            f"מין: {gender_he.get(ctx.gender, 'לא ידוע')}",
+            address,
+            f"עיר: {ctx.city}" if ctx.city else "",
+        ]
+        return "\n".join(x for x in lines if x)

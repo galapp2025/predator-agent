@@ -30,8 +30,8 @@ LLM_HEBREW_PARAMS = {
     "model": os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
     "fallback_model": os.getenv("OPENAI_MODEL", "gpt-4.1-mini"),
     "provider": "groq",
-    "temperature": 0.9,
-    "max_tokens": 90,
+    "temperature": 0.92,
+    "max_tokens": 48,
     "top_p": 0.92,
 }
 
@@ -127,10 +127,19 @@ class PredatorAgent:
                 age_group=voter_context.age_group or "unknown",
                 gender=voter_context.gender or "unknown",
             )
-            # AB בוחר פרסונה כשיש מספיק סיגנל / ברירת מחדל דמוגרפית חלשה
-            if ab_arm and ab_arm.get("pulls", 0) >= 0:
-                persona = ab_arm.get("best_persona") or persona
-
+            # AB רק עם סיגנל אמיתי — ואף פעם לא שובר התאמת מגדר קול
+            if ab_arm and int(ab_arm.get("pulls") or 0) >= 5:
+                cand = ab_arm.get("best_persona") or persona
+                persona = self._lock_persona_to_voter_gender(
+                    cand, voter_context.gender
+                )
+            else:
+                persona = self._lock_persona_to_voter_gender(
+                    persona, voter_context.gender
+                )
+        persona = self._lock_persona_to_voter_gender(
+            persona, getattr(voter_context, "gender", None) if voter_context else None
+        )
         session = CallSession(
             session_id=session_id,
             voter_context=voter_context,
@@ -170,12 +179,18 @@ class PredatorAgent:
         return f"{session.voter_context.first_name} {session.voter_context.last_name}".strip()
 
     def _initial_persona(self, ctx: Optional[VoterContext]) -> str:
+        """פרסונה לפי מגדר הבוחר — קול הסוכן תואם (לא גבר שפונה לאישה כ'אתה')."""
         if not ctx:
             return "S"
-        if ctx.gender == "female" and ctx.age_group == "65+":
+        if ctx.gender == "female":
+            # קול נקבי: מיה (I) / רונית (C)
+            if ctx.age_group in ("45-65", "65+"):
+                return "C"
+            return "I"
+        if ctx.gender == "male":
+            if ctx.age_group == "25-45":
+                return "D"
             return "S"
-        if ctx.gender == "male" and ctx.age_group in ("25-45", "45-65"):
-            return "D"
         if ctx.age_group == "25-45":
             return "I"
         if ctx.ethnic_hint == "russian":
@@ -183,6 +198,18 @@ class PredatorAgent:
         if ctx.ethnic_hint == "ethiopian":
             return "S"
         return "S"
+
+    @staticmethod
+    def _lock_persona_to_voter_gender(persona: str, gender: Optional[str]) -> str:
+        """מונע קול גברי מול בוחרת (ולהפך)."""
+        g = (gender or "").lower()
+        female = {"I", "C"}
+        male = {"D", "S"}
+        if g == "female" and persona not in female:
+            return "C" if persona == "S" else "I"
+        if g == "male" and persona not in male:
+            return "D" if persona == "I" else "S"
+        return persona or "S"
 
     async def process_voter_turn(
         self,
@@ -246,8 +273,12 @@ class PredatorAgent:
                     break
 
         voter_ctx_str = None
+        voter_first = ""
+        voter_gender = ""
         if session.voter_context:
             voter_ctx_str = self.voter_builder.to_prompt_context(session.voter_context)
+            voter_first = session.voter_context.first_name or ""
+            voter_gender = session.voter_context.gender or ""
 
         system_prompt = self.prompt_builder.build(
             persona_disc=session.current_persona,
@@ -258,6 +289,8 @@ class PredatorAgent:
             support_score=session.support_score,
             exchange_number=session.exchange_count,
             compact=compact_prompt,
+            voter_first_name=voter_first,
+            voter_gender=voter_gender,
         )
         whisper_overlay = self.whisper_bus.prompt_overlay(session_id)
         if whisper_overlay:
@@ -456,8 +489,11 @@ class PredatorAgent:
                     analysis.persona_recommendation != session.current_persona
                     and analysis.confidence > 0.6
                 ):
-                    session.current_persona = analysis.persona_recommendation
-                    logger.info("[%s] persona → %s", session.session_id, analysis.persona_recommendation)
+                    g = session.voter_context.gender if session.voter_context else None
+                    session.current_persona = self._lock_persona_to_voter_gender(
+                        analysis.persona_recommendation, g
+                    )
+                    logger.info("[%s] persona → %s", session.session_id, session.current_persona)
                 if analysis.best_tactic:
                     session.current_tactic_key = analysis.best_tactic
             if not analysis or analysis.confidence < 0.6:
@@ -477,7 +513,10 @@ class PredatorAgent:
         ]
         if len(recent_discs) >= 3 and len(set(recent_discs[-3:])) == 1:
             if recent_discs[-1] != session.current_persona:
-                session.current_persona = recent_discs[-1]
+                g = session.voter_context.gender if session.voter_context else None
+                session.current_persona = self._lock_persona_to_voter_gender(
+                    recent_discs[-1], g
+                )
                 logger.info(
                     "[%s] persona fallback DISC×3 → %s",
                     session.session_id,
@@ -570,7 +609,7 @@ class PredatorAgent:
         if ab_speed:
             # ממוצע עדין עם AB
             speed = (speed + float(ab_speed)) / 2.0
-        return round(max(0.88, min(1.08, speed)), 2)
+        return round(max(0.95, min(1.03, speed)), 2)
 
     def add_assistant_response(self, session_id: str, response: str) -> None:
         session = self.active_sessions.get(session_id)

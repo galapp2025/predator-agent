@@ -1,1 +1,1 @@
-web: PYTHONPATH=. python src/livekit_worker.py start
+web: PYTHONPATH=. python live_voice_server.py

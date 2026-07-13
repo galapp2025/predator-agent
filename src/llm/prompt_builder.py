@@ -194,31 +194,25 @@ HUMAN_RULES = """
 
 PERSONA_PROMPTS = {
     "D": """
-[פרסונה: אלון | D]
-38, איש שטח, מנהל סניף. מדבר ישר, מהר, בלי התלבטויות.
-חותך התלבטויות. 90 שניות. לא מבזבז על נימוסים מיותרים.
-ביטויים: "תקשיב, אני אגיד לך בדיוק מה המצב." | "העניין הוא פשוט."
-אסור: אולי, לדעתי, נראה לי, קח את הזמן.
+[אתה: אלון — גבר]
+איש שטח מהמטה. מדבר ישר, קצר, כמו שיחת טלפון.
 """,
     "I": """
-[פרסונה: מיה | I]
-35, אשת קשר ושטח. חמה, נלהבת, סיפורית. מדברת עם חיוך בקול.
-ביטויים: "תשמע, אני אספר לך סיפור —" | "וואלה, זה היה משהו מיוחד."
-אסור: בכל אופן, מצד שני, לסיכום, אובייקטיבית.
+[את: מיה — אישה]
+מהמטה. חמה, שיחתית. מדברת כמו אישה בטלפון.
 """,
     "S": """
-[פרסונה: דוד | S]
-50, איש של אנשים. מדבר לאט, רגוע, חם. נותן מרחב. לא לוחץ.
-ביטויים: "תקשיב, אין שום לחץ." | "אני מבין. לגמרי."
-אסור: מהר, עכשיו, תכף, קדימה, אין זמן.
+[אתה: דוד — גבר]
+מהמטה. רגוע, חם, מכבד. נותן מקום לדבר.
 """,
     "C": """
-[פרסונה: רונית | C]
-42, אשת נתונים. מדויקת, מאופקת, מבוססת עובדות. לא ממציאה מספרים.
-ביטויים: "הנתונים מראים ש—" | "העובדות פשוטות."
-אסור: מדהים, וואו, אין ספק, כולם אומרים, תאמין לי.
+[את: רונית — אישה]
+מהמטה. ברורה, עניינית. מדברת כמו אישה בטלפון.
 """,
 }
+
+PERSONA_AGENT_NAME = {"D": "אלון", "I": "מיה", "S": "דוד", "C": "רונית"}
+PERSONA_AGENT_GENDER = {"D": "male", "I": "female", "S": "male", "C": "female"}
 
 STATE_INSTRUCTIONS_TEXT = {
     "opening": "[מצב: פתיחה] אשר זהות → הצג את עצמך → בקש 90 שניות. קצר וחם.",
@@ -520,6 +514,8 @@ class PromptBuilder:
         support_score: float = 0.5,
         exchange_number: int = 1,
         compact: bool = False,
+        voter_first_name: str = "",
+        voter_gender: str = "",
     ) -> str:
         if compact:
             return PromptBuilder.build_compact(
@@ -530,6 +526,8 @@ class PromptBuilder:
                 best_tactic=best_tactic,
                 support_score=support_score,
                 exchange_number=exchange_number,
+                voter_first_name=voter_first_name,
+                voter_gender=voter_gender,
             )
         parts = [
             SABRA_IDENTITY,
@@ -570,42 +568,59 @@ class PromptBuilder:
         best_tactic: Optional[str] = None,
         support_score: float = 0.5,
         exchange_number: int = 1,
+        voter_first_name: str = "",
+        voter_gender: str = "",
     ) -> str:
-        """פרומפט קצר לשיחת קול / Groq (מגבלת TPM)."""
-        anti_short = """
-[ANTI_DETECTION]
-- אל תודה שאתה AI/בוט. אף פעם.
-- אם שואלים "אתה רובוט?" → צחק קצר וחזור לנושא: "מה? לא, סתם מתקשר מהמטה."
-- עברית מדוברת בלבד. משפטים קצרים. בלי אנגלית.
-- אם שותקים → "בוחן? אתה שם?"
-""".strip()
-        parts = [
-            SABRA_IDENTITY,
-            PERSONA_PROMPTS.get(persona_disc, PERSONA_PROMPTS["S"]),
-            SPEECH_FILLERS,
-            HUMAN_RULES,
-            anti_short,
-            SITUATION_HANDLERS,
-            OBJECTION_HANDLERS,
-        ]
-        if voter_context:
-            # שמור קצר
-            vc = voter_context if isinstance(voter_context, str) else str(voter_context)
-            parts.insert(2, vc[:600])
+        """שיחת טלפון חיה — מגדר + שמות מדויקים, תשובה מיידית לתוכן."""
+        agent_name = PERSONA_AGENT_NAME.get(persona_disc, "דוד")
+        agent_g = PERSONA_AGENT_GENDER.get(persona_disc, "male")
+        agent_line = (
+            f"את {agent_name} (אישה מהמטה)."
+            if agent_g == "female"
+            else f"אתה {agent_name} (גבר מהמטה)."
+        )
+        persona = PERSONA_PROMPTS.get(persona_disc, PERSONA_PROMPTS["S"]).strip()
+
+        g = (voter_gender or "").lower()
+        name = (voter_first_name or "").strip() or "הבוחר"
+        if g == "female":
+            address = (
+                f"הבוחרת: {name} (אישה). פנה רק בנקבה: את/שלך/לך/אותך. "
+                f"אסור לחלוטין: אתה, שלך (זכר), לך הזכרי, גבר."
+            )
+            name_rule = f"אפשר לפנות '{name}' פעם בתשובה — לא בכל משפט."
+        elif g == "male":
+            address = (
+                f"הבוחר: {name} (גבר). פנה רק בזכר: אתה/שלך/לך/אותך. "
+                f"אסור לחלוטין: את, שלך (נקבה), לך הנקבי, אישה."
+            )
+            name_rule = f"אפשר לפנות '{name}' פעם בתשובה — לא בכל משפט."
+        else:
+            address = f"שם: {name}. מגדר לא ברור — השתמש בשם, בלי אתה/את."
+            name_rule = f"השתמש ב'{name}' במקום כינוי גוף אם אפשר."
+
         state_key = (state or "opening").lower()
-        parts.append(STATE_INSTRUCTIONS_TEXT.get(state_key, STATE_INSTRUCTIONS_TEXT["opening"]))
-        if best_tactic:
-            parts.append(f"[TACTIC]\n{best_tactic[:500]}")
-        parts.append(
-            f"[RUNTIME]\nresistance={resistance_level}; support={support_score}; exchange={exchange_number}"
-        )
-        parts.append(
-            """[FINAL — דיבור טלפון טבעי]
-ענה בעברית מדוברת כמו אדם אמיתי בטלפון.
-- משפט-שניים לכל היותר (מקס ~30 מילים).
-- קצב אנושי: פסיקים ונשימות — לא מונולוג ולא "תסריט".
-- אסור: אנגלית, סוגריים, סוגרים מרובעים, מחשבות בקול ("לא, לא אומר את זה"), טון בוט.
-- אל תפתח תמיד באותו משפט. שנה פתיחה.
-- דבר ישירות לבוחר, בלי לספר מה אתה עומד להגיד."""
-        )
-        return "\n\n".join(parts)
+        state_hint = {
+            "opening": f"אם עדיין לא הצגת: 'היי {name}, אני {agent_name} מהמטה' — ואז לעניין.",
+            "deescalation": "תרגע/י. אשר/י ששמעת. בלי למכור.",
+            "exploration": "שאלה אחת קצרה על מה שנאמר.",
+            "persuasion": "משפט שכנוע אחד, אנושי.",
+            "commitment": "בקשה רכה אחת או שחרור.",
+            "objection_handling": "אשר/י התנגדות + תשובה קצרה.",
+            "closing": "תודה קצרה. בלי מכירה.",
+        }.get(state_key, "ענה ישירות למה שנאמר עכשיו.")
+
+        vc = f"\n{voter_context}" if voter_context else ""
+        return f"""שיחת טלפון חיה. עברית מדוברת. לא בוט.
+{agent_line}
+{persona}
+{address}
+{name_rule}{vc}
+מצב: {state_hint}
+
+חובה:
+- ענה ספציפית למה שנאמר עכשיו — משפט אחד, מקסימום שניים.
+- שמך כסוכן: {agent_name}. שם הבוחר/ת: {name}. אל תתבלבל בין השמות.
+- אם מציגים: "אני {agent_name} מהמטה" — לא להגיד שאתה הבוחר.
+- בלי סיסמאות: תקשיב / העניין הוא פשוט / אני אגיד לך בדיוק.
+- בלי אנגלית, סוגריים, רשימות."""

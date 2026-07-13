@@ -125,14 +125,15 @@ def get_speed(disc: str) -> float:
 
 
 def get_tts_params(disc: str) -> dict:
-    """Cartesia Hebrew — קצב שיחה טבעי + רגש לפי פרסונה."""
+    """Cartesia Hebrew — קול שיחה רגוע, בלי 'emotion' דרמטי שנשמע סינתטי."""
     persona = get_persona(disc)
-    emotion = {"D": "confident", "I": "content", "S": "calm", "C": "content"}.get(
-        disc, "calm"
-    )
+    # רגש עדין בלבד — confident/content נשמעים רובוטיים בעברית
+    emotion = {"D": "calm", "I": "calm", "S": "calm", "C": "calm"}.get(disc, "calm")
+    # קצב קרוב ל-1.0 = טבעי בטלפון
+    speed = {"D": 1.0, "I": 1.0, "S": 0.98, "C": 0.99}.get(disc, 1.0)
     return {
         "voice_id": persona.voice_id,
-        "speed": persona.speed,
+        "speed": speed,
         "stability": persona.stability,
         "similarity": persona.similarity,
         "language": "he",

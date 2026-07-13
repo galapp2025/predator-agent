@@ -67,12 +67,16 @@ class FastLLM:
         temperature: float = 0.82,
         max_tokens: int = 150,
         top_p: float = 0.92,
+        groq_model: Optional[str] = None,
+        openai_model: Optional[str] = None,
     ):
         self.groq_api_key = groq_api_key or os.getenv("GROQ_API_KEY", "")
         self.openai_api_key = openai_api_key or os.getenv("OPENAI_API_KEY", "")
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.top_p = top_p
+        self.groq_model = groq_model or GROQ_MODEL
+        self.openai_model = openai_model or OPENAI_MODEL
 
     @property
     def provider(self) -> str:
@@ -123,7 +127,7 @@ class FastLLM:
                     http,
                     GROQ_URL,
                     self.groq_api_key,
-                    GROQ_MODEL,
+                    self.groq_model,
                     messages,
                     timeout_sec,
                 )
@@ -154,7 +158,7 @@ class FastLLM:
                     http,
                     OPENAI_URL,
                     self.openai_api_key,
-                    OPENAI_MODEL,
+                    self.openai_model,
                     oa_messages,
                     timeout_sec,
                 )
