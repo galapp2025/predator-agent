@@ -175,6 +175,18 @@ def _is_real_key(key: str) -> bool:
     return True
 
 
+def _get_public_host(request) -> str:
+    """Resolve public host for TwiML WebSocket URL."""
+    host = os.getenv("PUBLIC_URL", "") or os.getenv("RAILWAY_PUBLIC_DOMAIN", "")
+    if not host:
+        host = request.headers.get("host", f"localhost:{PORT}")
+    if host.startswith("https://"):
+        host = host[8:]
+    elif host.startswith("http://"):
+        host = host[7:]
+    return host
+
+
 # ═══════════════════════════════════════════════════════════
 # TEST VOTER
 # ═══════════════════════════════════════════════════════════
@@ -780,7 +792,7 @@ async def handle_health(request):
 
 
 async def handle_twilio_voice(request):
-    host = request.headers.get("host", f"localhost:{PORT}")
+    host = _get_public_host(request)
     proto = "wss"
     ws_url = f"{proto}://{host}/twilio/media"
     twiml = _get_twiml(ws_url)
