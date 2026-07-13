@@ -207,11 +207,55 @@ class VoterContextBuilder:
             address = "פנה רק בזכר: אתה / שלך / לך / אותך. אסור את/לך הנקבי."
         else:
             address = "מגדר לא ידוע — הימנע מאתה/את; השתמש בשם או בניסוח ניטרלי."
+
+        ctype = (ctx.campaign_type or "primaries").strip().lower()
+        if ctype in {"general", "national", "knesset", "כללי", "כנסת"}:
+            campaign_line = (
+                "סוג קמפיין: בחירות כלליות לכנסת — מפלגה / פתק ארצי / קלפי / יום הבחירות."
+            )
+        elif ctype in {"municipal", "local", "city", "מוניציפלי", "עירוני"}:
+            campaign_line = (
+                "סוג קמפיין: בחירות מוניציפליות — ראש עיר / מועצה / שכונה / שירותי עיר. "
+                "הישאר מקומי לעיר הבוחר."
+            )
+        else:
+            campaign_line = (
+                "סוג קמפיין: פריימריז — פנקס חברים / סניף / מועמד פנים-מפלגתי."
+            )
+
         lines = [
-            f"שם הבוחר: {ctx.first_name}".strip(),
-            f"משפחה: {ctx.last_name}" if ctx.last_name else "",
+            "[VOTER_CONTEXT — מידע מודיעיני מקדים]",
+            campaign_line,
+            f"שם: {ctx.first_name} {ctx.last_name}".strip(),
             f"מין: {gender_he.get(ctx.gender, 'לא ידוע')}",
             address,
-            f"עיר: {ctx.city}" if ctx.city else "",
+            f"קבוצת גיל משוערת: {ctx.age_group}" if ctx.age_group else "",
+            f"נפשות בתא משפחתי: {ctx.household_members}",
+            f"עיר מגורים: {ctx.city}" if ctx.city else "",
         ]
+        if ctx.ethnic_hint and ctx.ethnic_hint != "general":
+            ethnic_he = {
+                "ethiopian": "יוצאי אתיופיה — חם, משפחתי",
+                "russian": "יוצאי בריה״מ — ישיר, מעשי",
+            }
+            lines.append(f"רמז עדתי: {ethnic_he.get(ctx.ethnic_hint, ctx.ethnic_hint)}")
+        lines.append(f"ציון תמיכה צפוי: {ctx.support_score:.2f}")
+        if ctx.support_score > 0.7:
+            lines.append("  → תומך בטוח. אסטרטגיה: GOTV — המרצה להצבעה.")
+        elif ctx.support_score < 0.3:
+            lines.append("  → לא תומך. אסטרטגיה: SCREENING.")
+        else:
+            lines.append("  → קול צף. אסטרטגיה: FULL_PERSUASION.")
+        if ctx.geo_anomaly:
+            lines.append("חריגה גאוגרפית: גר בעיר אחרת מהסניף")
+            if ctype in {"primaries", "primary", "פריימריז"}:
+                lines.append("  → בפריימריז: נכס — קשר חזק לסניף.")
+            elif ctype in {"municipal", "local", "city", "מוניציפלי"}:
+                lines.append("  → במוניציפלי: כנראה לא רלוונטי לעיר הזו.")
+            else:
+                lines.append("  → בכלליות: ודא כתובת קלפי לפי מקום מגורים.")
+        if ctx.street:
+            lines.append(f"רחוב: {ctx.street} {ctx.house_number}".strip())
+        if ctx.registered_branch:
+            lines.append(f"סניף רשום: {ctx.registered_branch}")
         return "\n".join(x for x in lines if x)

@@ -168,7 +168,7 @@ class VoiceSession:
                 street=voter.get("street", ""),
                 house_number=voter.get("house_number", ""),
                 support_score=float(voter.get("support_score") or 0.55),
-                campaign_type=voter.get("campaign_type", "primaries"),
+                campaign_type=voter.get("campaign_type") or voter.get("campaign") or "primaries",
                 gender=voter.get("gender") or "",
             )
         session = self.agent.create_session(self.session_id, voter_context=ctx, phone=phone)
@@ -184,6 +184,7 @@ class VoiceSession:
                 "persona": session.current_persona,
                 "voter_name": (ctx.first_name if ctx else "") or "",
                 "voter_gender": (ctx.gender if ctx else "") or "",
+                "campaign_type": (ctx.campaign_type if ctx else "") or "primaries",
             }
         )
 
@@ -386,48 +387,65 @@ class VoiceSession:
             await self._commit_utterance(text, source="final" if is_final else "speech_final")
             return
 
-        # interim — מציגים + מתחייבים אחרי 380ms בלי עדכון (לייטנסי נמוך)
+        # interim לתצוגה בלבד — בלי eager commit (גורם לגמגום/חזרות עם final)
         await self.send_json({"type": "transcript", "text": text, "is_final": False})
         if self._partial_commit_task:
             self._partial_commit_task.cancel()
+            self._partial_commit_task = None
 
-        async def _eager_commit(snapshot: str) -> None:
-            try:
-                await asyncio.sleep(0.25)
-                if self._partial == snapshot and len(snapshot.split()) >= 2:
-                    log.info("[%s] STT eager: %s", self.session_id, snapshot[:80])
-                    await self.send_json({"type": "transcript", "text": snapshot, "is_final": True})
-                    await self._commit_utterance(snapshot, source="eager")
-            except asyncio.CancelledError:
-                return
+    @staticmethod
+    def _norm_he(text: str) -> str:
+        t = re.sub(r"[^\w\sא-ת]", "", (text or "").strip().lower())
+        return re.sub(r"\s+", " ", t).strip()
 
-        self._partial_commit_task = asyncio.create_task(_eager_commit(text))
+    def _is_dup_utterance(self, text: str, *, window_sec: float = 2.2) -> bool:
+        now = time.time()
+        last = getattr(self, "_last_final_text", None) or ""
+        if not last:
+            return False
+        if (now - getattr(self, "_last_final_at", 0)) > window_sec:
+            return False
+        a, b = self._norm_he(text), self._norm_he(last)
+        if not a or not b:
+            return False
+        if a == b:
+            return True
+        if a.startswith(b) or b.startswith(a):
+            return abs(len(a) - len(b)) <= 10
+        # חפיפה גבוהה = אותה אמירה עם מילה נוספת
+        wa, wb = set(a.split()), set(b.split())
+        if not wa or not wb:
+            return False
+        overlap = len(wa & wb) / max(len(wa), len(wb))
+        return overlap >= 0.72
 
     async def _commit_utterance(self, text: str, *, source: str = "final") -> None:
         text = (text or "").strip()
         if not text or not self._agent_ready:
             return
-        # בזמן דיבור הסוכן — מתעלמים מהד קצר בלבד
+        # בזמן דיבור הסוכן — מתעלמים מהד / חזרות (גמגום)
         if time.time() < self._speaking_until:
             words = text.split()
-            if len(words) <= 2 and source in {"utterance_end", "eager"}:
+            if len(words) <= 4 or self._is_dup_utterance(text, window_sec=4.0):
                 return
-            if len(words) <= 1:
+            if source in {"utterance_end", "eager"}:
                 return
         run_now = False
         async with self._commit_lock:
-            now = time.time()
-            last = getattr(self, "_last_final_text", None) or ""
-            if last and (now - getattr(self, "_last_final_at", 0)) < 0.55:
-                if text == last or (text.startswith(last) and len(text) - len(last) < 12):
-                    if len(text) <= len(last) + 1:
-                        return
-            if len(text) < 2 or text in {"א", "אה", "ה", "מה", "מה מה", "ממ", "אוקיי"}:
+            if self._is_dup_utterance(text):
+                return
+            if len(text) < 2 or text in {"א", "אה", "ה", "מה", "מה מה", "ממ", "אוקיי", "אהה"}:
                 return
             self._last_final_text = text
-            self._last_final_at = now
+            self._last_final_at = time.time()
             self._partial = ""
             if self.busy:
+                # אל תערום חזרה על אותה אמירה בזמן תשובה
+                pending = getattr(self, "_pending_utterance", None) or ""
+                if pending and self._is_dup_utterance(text, window_sec=5.0):
+                    return
+                if pending and self._norm_he(text) == self._norm_he(pending):
+                    return
                 self._pending_utterance = text
                 log.info("[%s] queued (%s): %s", self.session_id, source, text[:80])
                 return
@@ -446,7 +464,7 @@ class VoiceSession:
             self._touch()
             pending = getattr(self, "_pending_utterance", None)
             self._pending_utterance = None
-            if pending and self._agent_ready:
+            if pending and self._agent_ready and not self._is_dup_utterance(pending, window_sec=3.5):
                 log.info("[%s] draining queued: %s", self.session_id, pending[:80])
                 await self._drain_pipeline(pending)
 
@@ -524,7 +542,30 @@ class VoiceSession:
             await self.send_json({"type": "status", "stage": "llm"})
             reply = await self._llm_reply(turn["system_prompt"], voter_text)
 
-        reply = _clip_spoken_reply(reply, max_words=14)
+        reply = _clip_spoken_reply(reply, max_words=18)
+        # אל תוסיף ל-history אם זהה לתשובה הקודמת (מונע לולאת חזרה)
+        sess = self.agent.active_sessions.get(self.session_id)
+        if sess and sess.conversation_history:
+            prev = next(
+                (h.get("content") for h in reversed(sess.conversation_history) if h.get("role") == "assistant"),
+                "",
+            )
+            if prev and self._norm_he(prev) == self._norm_he(reply):
+                g = (sess.voter_context.gender if sess.voter_context else "") or ""
+                name = (sess.voter_context.first_name if sess.voter_context else "") or ""
+                ctype = ((sess.voter_context.campaign_type if sess.voter_context else "") or "primaries").lower()
+                if ctype in {"municipal", "local", "city", "מוניציפלי"}:
+                    topic = "לבחירות בעיר"
+                elif ctype in {"general", "national", "knesset", "כללי", "כנסת"}:
+                    topic = "לבחירות לכנסת"
+                else:
+                    topic = "לפריימריז בסניף"
+                if g == "female":
+                    reply = f"סבבה{', ' + name if name else ''}, נחזור לעניין — את מגיעה {topic}?"
+                elif g == "male":
+                    reply = f"סבבה{', ' + name if name else ''}, נחזור לעניין — אתה מגיע {topic}?"
+                else:
+                    reply = f"סבבה, נחזור לעניין — מגיעים {topic}?"
         self.agent.add_assistant_response(self.session_id, reply)
 
         llm_ms = int((time.time() - t0) * 1000)
@@ -583,8 +624,8 @@ class VoiceSession:
         from src.llm.fast_llm import FastLLM
 
         llm = FastLLM(
-            temperature=0.85,
-            max_tokens=36,
+            temperature=0.7,
+            max_tokens=64,
             top_p=0.9,
             groq_model=GROQ_VOICE_MODEL,
         )
@@ -592,37 +633,25 @@ class VoiceSession:
             return "אני כאן, תגיד."
         history: List[Dict[str, str]] = []
         sess = self.agent.active_sessions.get(self.session_id)
-        voter_name = ""
-        voter_gender = ""
-        agent_name = ""
-        if sess:
-            if sess.voter_context:
-                voter_name = sess.voter_context.first_name or ""
-                voter_gender = sess.voter_context.gender or ""
-            from src.llm.prompt_builder import PERSONA_AGENT_NAME
-
-            agent_name = PERSONA_AGENT_NAME.get(sess.current_persona, "")
-            if sess.conversation_history:
-                for h in sess.conversation_history[:-1][-4:]:
-                    role = h.get("role")
-                    content = (h.get("content") or "").strip()
-                    if role in ("user", "assistant") and content:
-                        history.append({"role": role, "content": content[:140]})
-        if voter_gender == "female":
-            g_hint = f"פנה ל-{voter_name or 'הבוחרת'} בנקבה (את/שלך)."
-        elif voter_gender == "male":
-            g_hint = f"פנה ל-{voter_name or 'הבוחר'} בזכר (אתה/שלך)."
-        else:
-            g_hint = f"השם: {voter_name or 'לא ידוע'}."
-        tiny_system = (
-            f"אתה {agent_name or 'נציג'} מהמטה בטלפון. עברית מדוברת. "
-            f"{g_hint} משפט אחד, עד 12 מילים. בלי סיסמאות."
-        )
+        if sess and sess.conversation_history:
+            for h in sess.conversation_history[:-1][-6:]:
+                role = h.get("role")
+                content = (h.get("content") or "").strip()
+                if role in ("user", "assistant") and content:
+                    history.append({"role": role, "content": content[:220]})
+        # משתמשים בפרומפט המלא של Predator (קמפיין/פריימריז/מוניציפלי) — לא tiny
+        grounded = (system_prompt or "").strip()
+        if len(grounded) < 80:
+            grounded = (
+                "אתה נציג מטה בקמפיין בחירות בישראל. עברית מדוברת. "
+                "הישאר בבחירות כלליות / מוניציפליות / פריימריז לפי הקונטקסט. "
+                "משפט אחד-שניים. בלי סיסמאות."
+            )
         return await llm.reply(
-            tiny_system,
+            grounded,
             user_text,
             self.http,
-            timeout_sec=min(3.5, float(TURN_BUDGET_SEC)),
+            timeout_sec=min(4.0, float(TURN_BUDGET_SEC)),
             history=history,
         )
 

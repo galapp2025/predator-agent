@@ -89,6 +89,12 @@
         <option value="male">זכר — אתה / שלך</option>
         <option value="">לפי השם</option>
       </select>
+      <label class="sub">סוג קמפיין</label>
+      <select id="campaignType" style="width:100%;margin-top:6px;padding:10px 12px;border-radius:8px;border:1px solid var(--line);background:#0d141d;color:var(--text)">
+        <option value="primaries" selected>פריימריז</option>
+        <option value="municipal">מוניציפליות</option>
+        <option value="general">בחירות כלליות (כנסת)</option>
+      </select>
       <button id="btnMic" disabled>התחל שיחה (מיקרופון)</button>
       <div class="meter"><span id="levelBar"></span></div>
       <div class="row"><span>רמת מיק</span><span id="levelTxt">0%</span></div>
@@ -116,6 +122,8 @@
     let sttReady = false, sttWaitResolve = null, manualClose = false;
     let audioChain = Promise.resolve();
     let currentAudio = null;
+    let speakGen = 0;
+    let lastSpoken = '';
 
     if (/Cursor|Electron/i.test(navigator.userAgent)) $('cursorWarn').style.display = 'block';
 
@@ -142,6 +150,8 @@
     }
 
     function stopPlayback() {
+      speakGen += 1;
+      try { if (window.speechSynthesis) window.speechSynthesis.cancel(); } catch {}
       try { if (currentAudio) { currentAudio.pause(); currentAudio.src = ''; } } catch {}
       currentAudio = null;
       playing = false;
@@ -153,7 +163,7 @@
       return audioChain;
     }
 
-    /** דיבור מקומי מהיר — יעד לייטנסי <1s (בלי המתנה ל-OpenAI TTS) */
+    /** דיבור מקומי — דור אחד בכל פעם, בלי חזרה על אותו טקסט */
     let heVoice = null;
     function pickHebrewVoice() {
       try {
@@ -173,17 +183,30 @@
       return new Promise((resolve) => {
         try {
           if (!window.speechSynthesis || !text) { resolve(); return; }
-          window.speechSynthesis.cancel();
-          const u = new SpeechSynthesisUtterance(text);
+          const norm = String(text).trim();
+          if (norm && norm === lastSpoken && playing) { resolve(); return; }
+          const myGen = ++speakGen;
+          try { window.speechSynthesis.cancel(); } catch {}
+          const u = new SpeechSynthesisUtterance(norm);
           u.lang = lang || 'he-IL';
           if (heVoice) u.voice = heVoice;
-          u.rate = 1.08;
+          u.rate = 1.02;
           u.pitch = 1.0;
           u.volume = 1.0;
           playing = true;
-          u.onend = () => { playing = false; resolve(); };
-          u.onerror = () => { playing = false; resolve(); };
-          window.speechSynthesis.speak(u);
+          lastSpoken = norm;
+          const done = () => {
+            if (speakGen !== myGen) { resolve(); return; }
+            playing = false;
+            resolve();
+          };
+          u.onend = done;
+          u.onerror = done;
+          // Chrome bug: cancel+speak מיידי לפעמים בולע — מיקרו-דיליי
+          setTimeout(() => {
+            if (speakGen !== myGen) { resolve(); return; }
+            try { window.speechSynthesis.speak(u); } catch { done(); }
+          }, 40);
         } catch { playing = false; resolve(); }
       });
     }
@@ -207,6 +230,7 @@
             first_name: ($('voterFirst').value || 'רחל').trim(),
             last_name: ($('voterLast').value || '').trim(),
             gender: gender,
+            campaign_type: ($('campaignType').value || 'primaries'),
             city: 'פתח תקווה',
             street: 'הרצל', house_number: '12', support_score: 0.62, phone: '0501234567'
           }
@@ -267,7 +291,6 @@
         } else if (msg.type === 'ack') {
           // ignored
         } else if (msg.type === 'barge_in') {
-          try { window.speechSynthesis && window.speechSynthesis.cancel(); } catch {}
           stopPlayback();
           setStage('מאזין');
         } else if (msg.type === 'status') {
@@ -341,8 +364,8 @@
       silentGain.gain.value = 0;
       listening = true; // מתחילים לשלוח מיד (באפר בשרת עד ש-DG עולה)
       processor.onaudioprocess = (e) => {
-        // שולחים תמיד בזמן האזנה — גם בזמן TTS (barge-in + מונע 'תקיעת' STT)
-        if (!listening || !ws || ws.readyState !== 1) return;
+        // בזמן דיבור הסוכן לא שולחים אודיו — מונע הד/גמגום (barge-in רק אחרי playback_done)
+        if (!listening || playing || !ws || ws.readyState !== 1) return;
         const input = e.inputBuffer.getChannelData(0);
         setLevel(Math.min(100, rmsLevel(input) * 400));
         ws.send(floatTo16BitPCM(downsampleBuffer(input, audioCtx.sampleRate, 16000)));
