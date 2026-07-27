@@ -372,6 +372,45 @@ async def create_voter(payload: VoterCreate) -> dict[str, Any]:
     )
 
 
+async def enrich_imported_osint(imported_rows: list[dict[str, Any]], *, limit: int = 100) -> list[dict[str, Any]]:
+    """Option B: OSINT only newly imported voters (capped to keep import responsive)."""
+    pipeline = get_pipeline()
+    samples: list[dict[str, Any]] = []
+    for voter in imported_rows[:limit]:
+        name = f"{voter.get('first_name', '')} {voter.get('last_name', '')}".strip()
+        if not name:
+            continue
+        try:
+            profiles = await pipeline.enrich([name], location=str(voter.get("city") or ""))
+            if not profiles:
+                continue
+            p = profiles[0]
+            tier = p.tier.value if hasattr(p.tier, "value") else str(p.tier)
+            composite = float(getattr(p, "composite_score", 0) or 0)
+            updates: dict[str, Any] = {
+                "enriched_at": datetime.now(UTC).isoformat(),
+            }
+            # Only fill support when missing/zero — don't overwrite GOTV heuristics blindly
+            existing_support = voter.get("support_score")
+            if _missing_score(existing_support):
+                updates["support_score"] = max(0.05, min(0.95, composite / 100.0))
+            await db.update_voter(str(voter["id"]), updates)
+            samples.append(
+                {
+                    "name": name,
+                    "composite": composite,
+                    "tier": tier,
+                    "political": float(getattr(p, "political_capital", 0) or 0),
+                    "community": float(getattr(p, "community_influence", 0) or 0),
+                    "voter_reliability": float(getattr(p, "voter_reliability", 0) or 0),
+                    "financial": float(getattr(p, "financial_leverage", 0) or 0),
+                }
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("OSINT enrichment failed for %s: %s", name, exc)
+    return samples
+
+
 async def import_excel(file_obj: BinaryIO) -> dict[str, Any]:
     wb = openpyxl.load_workbook(file_obj, read_only=True, data_only=True)
     ws = wb.active
@@ -388,6 +427,7 @@ async def import_excel(file_obj: BinaryIO) -> dict[str, Any]:
 
     imported = 0
     duplicates = 0
+    new_rows: list[dict[str, Any]] = []
     for row in rows_iter:
         if not row:
             continue
@@ -445,7 +485,7 @@ async def import_excel(file_obj: BinaryIO) -> dict[str, Any]:
                 turnout /= 100.0
             turnout = max(0.0, min(1.0, turnout))
 
-        await db.insert_voter(
+        inserted = await db.insert_voter(
             {
                 "id": hashlib.sha256(f"{first}:{last}:{cell('phone')}".encode()).hexdigest()[:16],
                 "first_name": first,
@@ -458,10 +498,14 @@ async def import_excel(file_obj: BinaryIO) -> dict[str, Any]:
                 "turnout_history": turnout,
             }
         )
+        new_rows.append(inserted)
         imported += 1
 
     wb.close()
     gotv = await classify_db_voters()
+    osint_samples: list[dict[str, Any]] = []
+    if new_rows:
+        osint_samples = await enrich_imported_osint(new_rows)
     all_rows = await db.all_voters()
     return {
         "imported": imported,
@@ -469,6 +513,8 @@ async def import_excel(file_obj: BinaryIO) -> dict[str, Any]:
         "total": len(all_rows),
         "classified": gotv.get("classified", 0),
         "categories": gotv.get("categories", {}),
+        "osint_enriched": len(osint_samples),
+        "osint_samples": osint_samples[:20],
     }
 
 

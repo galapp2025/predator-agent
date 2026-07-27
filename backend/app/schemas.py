@@ -91,6 +91,8 @@ class ImportResult(BaseModel):
     total: int
     classified: int = 0
     categories: dict[str, int] = Field(default_factory=dict)
+    osint_enriched: int = 0
+    osint_samples: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class AnalyzeRequest(BaseModel):
