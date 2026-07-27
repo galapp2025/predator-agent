@@ -45,17 +45,47 @@ def _register_fonts():
     global _FONTS_REGISTERED
     if _FONTS_REGISTERED:
         return
-    try:
-        pdfmetrics.registerFont(TTFont('LiberationSans', _LIBERATION_SANS))
-        pdfmetrics.registerFont(TTFont('LiberationSans-Bold', _LIBERATION_SANS_BOLD))
-        pdfmetrics.registerFont(TTFont('LiberationSans-Italic', _LIBERATION_SANS_ITALIC))
-        pdfmetrics.registerFont(TTFont('LiberationSans-BoldItalic', _LIBERATION_SANS_BI))
-        pdfmetrics.registerFont(TTFont('LiberationSans-Oblique', _LIBERATION_SANS_ITALIC))
-        _FONTS_REGISTERED = True
-        logger.info("LiberationSans fonts registered for Hebrew/Latin PDF support")
-    except Exception as e:
-        logger.warning(f"Could not register LiberationSans fonts: {e}. Hebrew text may render as blanks.")
-        _FONTS_REGISTERED = True  # Don't retry
+    candidates = [
+        (
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
+            "/usr/share/fonts/truetype/liberation/LiberationSans-BoldItalic.ttf",
+        ),
+        (
+            "/Library/Fonts/Arial Unicode.ttf",
+            "/Library/Fonts/Arial Unicode.ttf",
+            "/Library/Fonts/Arial Unicode.ttf",
+            "/Library/Fonts/Arial Unicode.ttf",
+        ),
+        (
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+            "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        ),
+        (
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ),
+    ]
+    for regular, bold, italic, bi in candidates:
+        try:
+            pdfmetrics.registerFont(TTFont("LiberationSans", regular))
+            pdfmetrics.registerFont(TTFont("LiberationSans-Bold", bold))
+            pdfmetrics.registerFont(TTFont("LiberationSans-Italic", italic))
+            pdfmetrics.registerFont(TTFont("LiberationSans-BoldItalic", bi))
+            pdfmetrics.registerFont(TTFont("LiberationSans-Oblique", italic))
+            _FONTS_REGISTERED = True
+            logger.info("PDF fonts registered from %s", regular)
+            return
+        except Exception:
+            continue
+    logger.warning("Could not register Hebrew-capable fonts. Hebrew text may render as blanks.")
+    _FONTS_REGISTERED = True  # Don't retry
+
 
 # ---- Styles ----
 

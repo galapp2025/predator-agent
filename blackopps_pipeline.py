@@ -15,6 +15,7 @@ Outputs:
 import asyncio
 import hashlib
 import json
+import os
 import random
 import sys
 import time
@@ -25,12 +26,12 @@ from pathlib import Path
 import aiohttp
 import openpyxl
 
-sys.path.insert(0, "/home/user/predator-agent/backend")
+sys.path.insert(0, str(Path(__file__).resolve().parent / "backend"))
 from app.intelligence.gotv import GOTVPredictor, GOTVProfile, VoterCategory, gotv_battleplan
 from app.intelligence.scoring import InfluenceProfile, InfluenceTier
 
-API_BASE = "https://blackopps-api-production.up.railway.app"
-DEFAULT_EXCEL = "/home/user/upload/file.xlsx"
+API_BASE = os.getenv("BLACKOPPS_API_URL", "http://127.0.0.1:8000")
+DEFAULT_EXCEL = str(Path(__file__).resolve().parent / "upload" / "file.xlsx")
 IMPORT_BATCH = 50
 PUSH_BATCH = 50
 random.seed(42)

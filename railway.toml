@@ -1,9 +1,9 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "pip install -r requirements.txt"
+buildCommand = "pip install -r backend/app/requirements.txt && apt-get update && apt-get install -y fonts-liberation"
 
 [deploy]
-startCommand = "python3 prod_server.py"
+startCommand = "cd backend/app && uvicorn main:app --host 0.0.0.0 --port ${PORT:-8765}"
 numReplicas = 1
 healthcheckPath = "/health"
 restartPolicyMaxRetries = 3
