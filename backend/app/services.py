@@ -31,6 +31,8 @@ HEADER_ALIASES: dict[str, tuple[str, ...]] = {
     "neighborhood": ("neighborhood", "שכונה", "רחוב", "street", "address"),
     "phone": ("phone", "טלפון", "מס טלפון 1", "mobile", "cell"),
     "email": ("email", "מייל", "e-mail"),
+    "support_score": ("support_score", "support", "score", "תמיכה"),
+    "turnout_history": ("turnout_history", "turnout", "הצבעה"),
 }
 
 MESSAGE_TEMPLATES: dict[str, str] = {
@@ -405,8 +407,44 @@ async def import_excel(file_obj: BinaryIO) -> dict[str, Any]:
             continue
         name = f"{first} {last}".strip()
         city = cell("city")
-        support, turnout = estimate_voter_scores(name, city)
-        logger.info("Estimated support_score for %s: %.2f (default for Likud voters)", name, support)
+
+        support_raw = None
+        turnout_raw = None
+        if "support_score" in mapping:
+            try:
+                raw = row[mapping["support_score"]]
+                support_raw = None if raw is None or str(raw).strip() == "" else float(raw)
+            except (TypeError, ValueError, IndexError):
+                support_raw = None
+        if "turnout_history" in mapping:
+            try:
+                raw = row[mapping["turnout_history"]]
+                turnout_raw = None if raw is None or str(raw).strip() == "" else float(raw)
+            except (TypeError, ValueError, IndexError):
+                turnout_raw = None
+
+        est_s, est_t = estimate_voter_scores(name, city)
+        if _missing_score(support_raw):
+            support = est_s
+            logger.info(
+                "Estimated support_score for %s: %.2f (default for Likud voters)",
+                name,
+                support,
+            )
+        else:
+            support = float(support_raw)
+            if support > 1:
+                support /= 100.0
+            support = max(0.0, min(1.0, support))
+
+        if _missing_score(turnout_raw):
+            turnout = est_t
+        else:
+            turnout = float(turnout_raw)
+            if turnout > 1:
+                turnout /= 100.0
+            turnout = max(0.0, min(1.0, turnout))
+
         await db.insert_voter(
             {
                 "id": hashlib.sha256(f"{first}:{last}:{cell('phone')}".encode()).hexdigest()[:16],
