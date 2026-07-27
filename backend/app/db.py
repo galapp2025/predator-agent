@@ -1,41 +1,87 @@
-"""SQLite persistence for BlackOpps voters."""
+"""BlackOpps voter persistence — SQLite by default, Postgres via DATABASE_URL."""
 
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
-import aiosqlite
+from sqlalchemy import (
+    Column,
+    Float,
+    Integer,
+    MetaData,
+    String,
+    Table,
+    Text,
+    func,
+    select,
+    text,
+)
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
 # Repo root: predator-agent/  (…/backend/app/db.py → parents[2])
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "data"
-DB_PATH = Path(os.getenv("BLACKOPPS_DB", str(DATA_DIR / "blackopps.db")))
+_DEFAULT_SQLITE = f"sqlite+aiosqlite:///{(DATA_DIR / 'blackopps.db').as_posix()}"
 
-SCHEMA_SQL = """
-CREATE TABLE IF NOT EXISTS voters (
-    id TEXT PRIMARY KEY,
-    first_name TEXT NOT NULL,
-    last_name TEXT NOT NULL,
-    city TEXT DEFAULT '',
-    neighborhood TEXT DEFAULT '',
-    phone TEXT DEFAULT '',
-    email TEXT DEFAULT '',
-    support_score REAL DEFAULT 0.5,
-    turnout_history REAL DEFAULT 0.0,
-    gotv_category TEXT DEFAULT '',
-    gotv_priority INTEGER DEFAULT 0,
-    gotv_channel TEXT DEFAULT '',
-    gotv_frequency TEXT DEFAULT '',
-    gotv_message TEXT DEFAULT '',
-    enriched_at TEXT,
-    created_at TEXT DEFAULT (datetime('now')),
-    updated_at TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_voters_name ON voters(first_name, last_name);
-CREATE INDEX IF NOT EXISTS idx_voters_category ON voters(gotv_category);
-"""
+
+def _normalize_database_url(raw: str | None) -> str:
+    """Accept Railway postgres:// URLs, plain paths, and SQLAlchemy URLs."""
+    url = (raw or "").strip()
+    if not url:
+        return _DEFAULT_SQLITE
+    if "://" not in url:
+        path = Path(url).expanduser().resolve()
+        return f"sqlite+aiosqlite:///{path.as_posix()}"
+    if url.startswith("postgres://"):
+        return "postgresql+asyncpg://" + url[len("postgres://") :]
+    if url.startswith("postgresql://") and "+asyncpg" not in url:
+        return "postgresql+asyncpg://" + url[len("postgresql://") :]
+    if url.startswith("sqlite:///") and "+aiosqlite" not in url:
+        return "sqlite+aiosqlite:///" + url[len("sqlite:///") :]
+    return url
+
+
+# Prefer DATABASE_URL; fall back to BLACKOPPS_DB path, then local SQLite file.
+DATABASE_URL = _normalize_database_url(
+    os.getenv("DATABASE_URL")
+    or (os.getenv("BLACKOPPS_DB") and str(Path(os.getenv("BLACKOPPS_DB", "")).expanduser()))
+    or _DEFAULT_SQLITE
+)
+
+IS_SQLITE = DATABASE_URL.startswith("sqlite")
+if IS_SQLITE:
+    DB_PATH = Path(urlparse(DATABASE_URL).path)
+else:
+    # Host/db fragment for logs (no credentials)
+    DB_PATH = Path(DATABASE_URL.split("@")[-1].split("?")[0])
+
+metadata = MetaData()
+
+voters = Table(
+    "voters",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("first_name", String(255), nullable=False),
+    Column("last_name", String(255), nullable=False),
+    Column("city", String(255), default=""),
+    Column("neighborhood", String(255), default=""),
+    Column("phone", String(64), default=""),
+    Column("email", String(255), default=""),
+    Column("support_score", Float, default=0.5),
+    Column("turnout_history", Float, default=0.0),
+    Column("gotv_category", String(32), default=""),
+    Column("gotv_priority", Integer, default=0),
+    Column("gotv_channel", String(64), default=""),
+    Column("gotv_frequency", String(64), default=""),
+    Column("gotv_message", Text, default=""),
+    Column("enriched_at", Text, nullable=True),
+    Column("created_at", Text, nullable=True),
+    Column("updated_at", Text, nullable=True),
+)
 
 VOTER_COLUMNS = (
     "id",
@@ -57,22 +103,36 @@ VOTER_COLUMNS = (
     "updated_at",
 )
 
+_engine: AsyncEngine | None = None
+_Session: async_sessionmaker[AsyncSession] | None = None
 
-def _row_to_dict(row: aiosqlite.Row) -> dict[str, Any]:
-    return {k: row[k] for k in row.keys()}
+
+def _get_engine() -> AsyncEngine:
+    global _engine, _Session
+    if _engine is None:
+        kwargs: dict[str, Any] = {"pool_pre_ping": True}
+        if IS_SQLITE:
+            kwargs["connect_args"] = {"check_same_thread": False}
+        _engine = create_async_engine(DATABASE_URL, **kwargs)
+        _Session = async_sessionmaker(_engine, expire_on_commit=False)
+    return _engine
+
+
+def _session_factory() -> async_sessionmaker[AsyncSession]:
+    if _Session is None:
+        _get_engine()
+    assert _Session is not None
+    return _Session
 
 
 async def init_db() -> None:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.executescript(SCHEMA_SQL)
-        await db.commit()
-
-
-async def get_connection() -> aiosqlite.Connection:
-    db = await aiosqlite.connect(DB_PATH)
-    db.row_factory = aiosqlite.Row
-    return db
+    if IS_SQLITE:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        await conn.run_sync(metadata.create_all)
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_voters_name ON voters (first_name, last_name)"))
+        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_voters_category ON voters (gotv_category)"))
 
 
 async def list_voters(
@@ -82,90 +142,76 @@ async def list_voters(
     category: str | None = None,
     search: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    clauses: list[str] = []
-    params: list[Any] = []
-    if category:
-        clauses.append("LOWER(gotv_category) = LOWER(?)")
-        params.append(category)
-    if search:
-        clauses.append(
-            "(first_name LIKE ? OR last_name LIKE ? OR city LIKE ? OR phone LIKE ?)"
+    async with _session_factory()() as db:
+        filters = []
+        if category:
+            filters.append(func.lower(voters.c.gotv_category) == category.lower())
+        if search:
+            like = f"%{search}%"
+            filters.append(
+                (voters.c.first_name.like(like))
+                | (voters.c.last_name.like(like))
+                | (voters.c.city.like(like))
+                | (voters.c.phone.like(like))
+            )
+        count_stmt = select(func.count()).select_from(voters)
+        list_stmt = (
+            select(voters)
+            .order_by(voters.c.gotv_priority.desc(), voters.c.created_at.desc())
+            .limit(limit)
+            .offset(offset)
         )
-        like = f"%{search}%"
-        params.extend([like, like, like, like])
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute(f"SELECT COUNT(*) AS c FROM voters {where}", params)
-        total = int((await cur.fetchone())["c"])
-        cur = await db.execute(
-            f"""
-            SELECT * FROM voters {where}
-            ORDER BY gotv_priority DESC, created_at DESC
-            LIMIT ? OFFSET ?
-            """,
-            [*params, limit, offset],
-        )
-        rows = await cur.fetchall()
-        return [_row_to_dict(r) for r in rows], total
+        for f in filters:
+            count_stmt = count_stmt.where(f)
+            list_stmt = list_stmt.where(f)
+        total = int((await db.execute(count_stmt)).scalar_one())
+        rows = (await db.execute(list_stmt)).mappings().all()
+        return [dict(r) for r in rows], total
 
 
 async def get_voter(voter_id: str) -> dict[str, Any] | None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute("SELECT * FROM voters WHERE id = ?", (voter_id,))
-        row = await cur.fetchone()
-        return _row_to_dict(row) if row else None
+    async with _session_factory()() as db:
+        row = (await db.execute(select(voters).where(voters.c.id == voter_id))).mappings().first()
+        return dict(row) if row else None
 
 
 async def find_by_name(first_name: str, last_name: str) -> dict[str, Any] | None:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cur = await db.execute(
-            "SELECT * FROM voters WHERE LOWER(first_name)=LOWER(?) AND LOWER(last_name)=LOWER(?) LIMIT 1",
-            (first_name.strip(), last_name.strip()),
-        )
-        row = await cur.fetchone()
-        return _row_to_dict(row) if row else None
+    async with _session_factory()() as db:
+        row = (
+            await db.execute(
+                select(voters)
+                .where(
+                    func.lower(voters.c.first_name) == first_name.strip().lower(),
+                    func.lower(voters.c.last_name) == last_name.strip().lower(),
+                )
+                .limit(1)
+            )
+        ).mappings().first()
+        return dict(row) if row else None
 
 
 async def insert_voter(data: dict[str, Any]) -> dict[str, Any]:
-    cols = [c for c in VOTER_COLUMNS if c in data]
-    placeholders = ", ".join("?" for _ in cols)
-    col_sql = ", ".join(cols)
-    values = [data[c] for c in cols]
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        await db.execute(f"INSERT INTO voters ({col_sql}) VALUES ({placeholders})", values)
+    payload = {c: data[c] for c in VOTER_COLUMNS if c in data}
+    now = datetime.now(UTC).isoformat()
+    payload.setdefault("created_at", now)
+    payload.setdefault("updated_at", now)
+    async with _session_factory()() as db:
+        await db.execute(voters.insert().values(**payload))
         await db.commit()
-        cur = await db.execute("SELECT * FROM voters WHERE id = ?", (data["id"],))
-        row = await cur.fetchone()
-        assert row is not None
-        return _row_to_dict(row)
+    row = await get_voter(str(payload["id"]))
+    assert row is not None
+    return row
 
 
 async def update_voter(voter_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
     allowed = {k: v for k, v in fields.items() if k in VOTER_COLUMNS and k != "id" and v is not None}
     if not allowed:
         return await get_voter(voter_id)
-    allowed["updated_at"] = "datetime('now')"
-    # Build SET carefully — datetime('now') as SQL expression
-    sets: list[str] = []
-    params: list[Any] = []
-    for k, v in allowed.items():
-        if k == "updated_at":
-            sets.append("updated_at = datetime('now')")
-        else:
-            sets.append(f"{k} = ?")
-            params.append(v)
-    params.append(voter_id)
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        await db.execute(f"UPDATE voters SET {', '.join(sets)} WHERE id = ?", params)
+    allowed["updated_at"] = datetime.now(UTC).isoformat()
+    async with _session_factory()() as db:
+        await db.execute(voters.update().where(voters.c.id == voter_id).values(**allowed))
         await db.commit()
-        cur = await db.execute("SELECT * FROM voters WHERE id = ?", (voter_id,))
-        row = await cur.fetchone()
-        return _row_to_dict(row) if row else None
+    return await get_voter(voter_id)
 
 
 async def all_voters() -> list[dict[str, Any]]:

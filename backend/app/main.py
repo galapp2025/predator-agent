@@ -56,7 +56,11 @@ async def lifespan(_app: FastAPI):
         logger.info("Auth enabled (%s keys)", auth.key_count())
     else:
         logger.warning("Auth disabled — set BLACKOPPS_API_KEYS to enforce X-API-Key")
-    logger.info("BlackOpps API ready · db=%s", db.DB_PATH)
+    logger.info(
+        "BlackOpps API ready · db=%s · url=%s",
+        db.DB_PATH,
+        "sqlite" if db.IS_SQLITE else "postgres",
+    )
     yield
 
 
