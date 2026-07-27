@@ -475,43 +475,47 @@ class OppositionResearch:
 
 def comparison_to_dict(result: ComparisonResult) -> dict:
     """Convert ComparisonResult to API-safe dict."""
-    return {
-        "candidates": {
-            "a": {
-                "name": result.candidate_a.name,
-                "composite": result.candidate_a.composite_score,
-                "tier": result.candidate_a.tier,
-                "dimensions": {
-                    "political": result.candidate_a.political_capital,
-                    "community": result.candidate_a.community_influence,
-                    "voter": result.candidate_a.voter_reliability,
-                    "financial": result.candidate_a.financial_leverage,
-                },
-                "strengths": result.candidate_a.strengths,
-                "weaknesses": result.candidate_a.weaknesses,
-                "vulnerabilities": result.candidate_a.vulnerabilities,
-                "attack_surface": result.a_attack_surface,
-                "defensive_gaps": result.a_defensive_gaps,
-                "advantages": result.a_advantages,
-            },
-            "b": {
-                "name": result.candidate_b.name,
-                "composite": result.candidate_b.composite_score,
-                "tier": result.candidate_b.tier,
-                "dimensions": {
-                    "political": result.candidate_b.political_capital,
-                    "community": result.candidate_b.community_influence,
-                    "voter": result.candidate_b.voter_reliability,
-                    "financial": result.candidate_b.financial_leverage,
-                },
-                "strengths": result.candidate_b.strengths,
-                "weaknesses": result.candidate_b.weaknesses,
-                "vulnerabilities": result.candidate_b.vulnerabilities,
-                "attack_surface": result.b_attack_surface,
-                "defensive_gaps": result.b_defensive_gaps,
-                "advantages": result.b_advantages,
-            },
+    a = {
+        "name": result.candidate_a.name,
+        "composite": result.candidate_a.composite_score,
+        "tier": result.candidate_a.tier,
+        "dimensions": {
+            "political": result.candidate_a.political_capital,
+            "community": result.candidate_a.community_influence,
+            "voter": result.candidate_a.voter_reliability,
+            "financial": result.candidate_a.financial_leverage,
         },
+        "strengths": result.candidate_a.strengths,
+        "weaknesses": result.candidate_a.weaknesses,
+        "vulnerabilities": result.candidate_a.vulnerabilities,
+        "attack_surface": result.a_attack_surface,
+        "defensive_gaps": result.a_defensive_gaps,
+        "advantages": result.a_advantages,
+    }
+    b = {
+        "name": result.candidate_b.name,
+        "composite": result.candidate_b.composite_score,
+        "tier": result.candidate_b.tier,
+        "dimensions": {
+            "political": result.candidate_b.political_capital,
+            "community": result.candidate_b.community_influence,
+            "voter": result.candidate_b.voter_reliability,
+            "financial": result.candidate_b.financial_leverage,
+        },
+        "strengths": result.candidate_b.strengths,
+        "weaknesses": result.candidate_b.weaknesses,
+        "vulnerabilities": result.candidate_b.vulnerabilities,
+        "attack_surface": result.b_attack_surface,
+        "defensive_gaps": result.b_defensive_gaps,
+        "advantages": result.b_advantages,
+    }
+    return {
+        # Canonical nested shape
+        "candidates": {"a": a, "b": b},
+        # Flat aliases expected by clients / integrity suite
+        "candidate_a": a,
+        "candidate_b": b,
+        "composite_delta": result.margin_composite,
         "head_to_head": {
             "winner_composite": result.winner_composite,
             "margin_composite": result.margin_composite,

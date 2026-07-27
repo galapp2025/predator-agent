@@ -143,7 +143,7 @@ async def health() -> HealthResponse:
             service="blackopps",
             version="5.0.0",
             auth_configured=auth.is_configured,
-            modules=["gotv", "scoring", "pipeline", "opposition", "pdf", "collectors", "dispatch"],
+            modules=["gotv", "scoring", "pipeline", "opposition", "pdf", "collectors"],
         )
     except Exception:
         logger.error(traceback.format_exc())
