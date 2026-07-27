@@ -386,6 +386,7 @@ async def dispatch_message(payload: DispatchRequest) -> DispatchResponse:
             priority=payload.priority,
             message=payload.message,
             message_template=payload.message_template,
+            custom_message=payload.custom_message,
         )
         return DispatchResponse(
             status=record["status"],

@@ -147,7 +147,8 @@ class DispatchRequest(BaseModel):
     channel: str = "WhatsApp"
     priority: int = 50
     message: str = ""
-    message_template: str | None = None
+    custom_message: str | None = None
+    message_template: str | None = "civic_duty"
 
 
 class DispatchResponse(BaseModel):
