@@ -1,6 +1,14 @@
 """
 BlackOpps — Integrity Self-Test Suite
 Run: python3 backend/app/test_integrity.py
+
+Optional env:
+  BLACKOPPS_API_URL      — default production Railway API
+  BLACKOPPS_FRONTEND_URL — default blackopps.vercel.app
+
+Sections 1–12: legacy routes (expect 74 passes when production is healthy).
+Sections 13–14: Features 1–4 (/api + new frontend routes); gate tests fail until deploy.
+
 Exit code 0 = ALL PASS. Exit code 1 = FAILURES FOUND.
 """
 
@@ -107,6 +115,12 @@ def html_get(url: str):
         req = urllib.request.Request(url)
         with _open(req, timeout=30) as resp:
             return resp.status, resp.read().decode(errors="replace")
+    except urllib.error.HTTPError as e:
+        try:
+            body = e.read().decode(errors="replace")
+        except Exception:
+            body = ""
+        return e.code, body
     except Exception as e:
         return 0, str(e)
 
@@ -580,15 +594,21 @@ if code_feat_probe == 200:
 # ─── 14. FEATURE PAGES (FRONTEND) ───
 print()
 print("── 14. FEATURE PAGES (FRONTEND) ──")
-for path, label in (
-    ("/war-room", "חמ״ל"),
-    ("/messages", "מסרים"),
-    ("/influence", "השפעה"),
-    ("/sentiment", "סנטימנט"),
-):
-    code, page = html_get(f"{FRONTEND}{path}")
-    test(f"Frontend {path} returns 200", code == 200, f"Got {code}")
-    if code == 200:
+code_wr_page, _ = html_get(f"{FRONTEND}/war-room")
+test(
+    "Feature pages deployed on Vercel (/war-room)",
+    code_wr_page == 200,
+    f"Got {code_wr_page} — push election-enrichment-engine frontend and redeploy Vercel",
+)
+if code_wr_page == 200:
+    for path, label in (
+        ("/war-room", "חמ״ל"),
+        ("/messages", "מסרים"),
+        ("/influence", "השפעה"),
+        ("/sentiment", "סנטימנט"),
+    ):
+        code, page = html_get(f"{FRONTEND}{path}")
+        test(f"Frontend {path} returns 200", code == 200, f"Got {code}")
         test(f"Frontend {path} RTL", 'dir="rtl"' in page, "RTL missing")
         test(
             f"Frontend {path} Hebrew content",
@@ -596,12 +616,10 @@ for path, label in (
             "No Hebrew",
         )
 
-# Scan one feature JS bundle for /api/war-room when HTML is static shell
-if features_api_live():
-    code, home = html_get(f"{FRONTEND}/war-room")
-    if code == 200:
+    if features_api_live():
+        code, home = html_get(f"{FRONTEND}/war-room")
         api_in_feature_bundle = "war-room/overview" in home or "/api/" in home
-        if not api_in_feature_bundle:
+        if code == 200 and not api_in_feature_bundle:
             for m in re.findall(r'src="([^"]+_next/static/[^"]+\.js)"', home):
                 js_url = m if m.startswith("http") else f"{FRONTEND}{m}"
                 jcode, jbody = html_get(js_url)
@@ -611,7 +629,7 @@ if features_api_live():
         test(
             "Frontend feature bundle references /api routes",
             api_in_feature_bundle,
-            "Deploy frontend commit 4f5443e+ to Vercel",
+            "Missing /api path strings in HTML/JS",
         )
 
 # ─── SUMMARY ───
