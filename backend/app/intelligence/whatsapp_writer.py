@@ -49,6 +49,8 @@ _batch_exports: dict[str, list[dict[str, Any]]] = {}
 
 class GenerateRequest(BaseModel):
     voter_id: str = Field(min_length=1)
+    campaign_topic: str = "קהילה"
+    tone_hint: str = "חם"
 
 
 class BatchGenerateRequest(BaseModel):
@@ -360,7 +362,11 @@ async def generate_whatsapp(payload: GenerateRequest) -> dict[str, Any]:
     voter = await db.get_voter(payload.voter_id)
     if not voter:
         raise HTTPException(status_code=404, detail=f"Voter '{payload.voter_id}' not found")
-    return await build_message_package(voter)
+    return await build_message_package(
+        voter,
+        campaign_topic=payload.campaign_topic,
+        tone_hint=payload.tone_hint,
+    )
 
 
 @router.post("/batch-generate")

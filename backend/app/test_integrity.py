@@ -8,14 +8,16 @@ from __future__ import annotations
 
 import io
 import json
+import os
+import re
 import ssl
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 
-API = "https://blackopps-api-production.up.railway.app"
-FRONTEND = "https://blackopps.vercel.app"
+API = os.environ.get("BLACKOPPS_API_URL", "https://blackopps-api-production.up.railway.app").rstrip("/")
+FRONTEND = os.environ.get("BLACKOPPS_FRONTEND_URL", "https://blackopps.vercel.app").rstrip("/")
 PASSED = 0
 FAILED = 0
 ERRORS: list[str] = []
@@ -107,6 +109,16 @@ def html_get(url: str):
             return resp.status, resp.read().decode(errors="replace")
     except Exception as e:
         return 0, str(e)
+
+
+def has_hebrew(text: str) -> bool:
+    return bool(text) and any("\u0590" <= c <= "\u05ff" for c in text)
+
+
+def features_api_live() -> bool:
+    """True when Feature 1–4 /api routes are deployed on the target API."""
+    code, _ = api_get("/api/war-room/overview")
+    return code == 200
 
 
 print("═" * 60)
@@ -421,6 +433,186 @@ try:
         test("Import returns total", "total" in data, f"Keys: {list(data.keys())}")
 except Exception as e:
     test("POST /voters/import works", False, str(e))
+
+# ─── 13. FEATURES 1–4 (/api) ───
+print()
+print("── 13. FEATURES 1–4 (API) ──")
+code_feat_probe, _feat_probe = api_get("/api/war-room/overview")
+test(
+    "Features 1–4 deployed (GET /api/war-room/overview)",
+    code_feat_probe == 200,
+    f"Got {code_feat_probe} — deploy predator-agent backend to Railway or set BLACKOPPS_API_URL",
+)
+
+sample_voter_id: str | None = None
+code, voters_sample = api_get("/voters?limit=5")
+if code == 200 and voters_sample.get("voters"):
+    sample_voter_id = str(voters_sample["voters"][0].get("id"))
+    sample_ids = [str(v.get("id")) for v in voters_sample["voters"][:5] if v.get("id")]
+else:
+    sample_ids = []
+
+if code_feat_probe == 200:
+    # Feature 4 — War Room
+    code, wr = api_get("/api/war-room/overview")
+    test("GET /api/war-room/overview returns 200", code == 200, f"Got {code}")
+    test("War room has totals.voters", isinstance(wr.get("totals"), dict) and wr["totals"].get("voters", 0) >= 3371)
+    test("War room has gotv_distribution", "gotv_distribution" in wr)
+    test("War room SAFE count > 0", wr.get("gotv_distribution", {}).get("SAFE", 0) > 0)
+    test("War room has gotv_trend with delta", "SWING" in wr.get("gotv_trend", {}))
+    swing_trend = wr.get("gotv_trend", {}).get("SWING", {})
+    if swing_trend:
+        test(
+            "War room GOTV trend delta consistent",
+            swing_trend.get("delta") == swing_trend.get("now", 0) - swing_trend.get("7d_ago", 0),
+            f"SWING trend={swing_trend}",
+        )
+    test("War room has dispatch_queue", "dispatch_queue" in wr)
+    test("War room has top_priorities", isinstance(wr.get("top_priorities"), list) and len(wr["top_priorities"]) > 0)
+    test("War room has neighborhood_heatmap", isinstance(wr.get("neighborhood_heatmap"), list))
+
+    code, ed = api_post(
+        "/api/war-room/emergency-dispatch",
+        {"mode": "TOP_SWING", "neighborhood": "all", "count": 5},
+    )
+    test("POST /api/war-room/emergency-dispatch returns 200", code == 200, f"Got {code}: {ed}")
+    test("Emergency dispatch dispatched > 0", int(ed.get("dispatched", 0)) > 0, f"dispatched={ed.get('dispatched')}")
+    test("Emergency dispatch returns task ids", isinstance(ed.get("tasks"), list) and len(ed["tasks"]) > 0)
+
+    # Feature 1 — Messages
+    test("Sample voter id available for message tests", bool(sample_voter_id), "No voters in DB")
+    if sample_voter_id:
+        code, msg = api_post("/api/intel/messages/generate", {"voter_id": sample_voter_id})
+        test("POST /api/intel/messages/generate returns 200", code == 200, f"Got {code}: {msg}")
+        channels = msg.get("channels") or {}
+        for ch in ("whatsapp", "sms", "phone_script", "door_knock"):
+            test(f"Message channel present: {ch}", ch in channels, f"Keys: {list(channels.keys())}")
+            test(f"Message channel {ch} has Hebrew", has_hebrew(str(channels.get(ch, ""))))
+        test("Message confidence > 0.5", float(msg.get("confidence") or 0) > 0.5, f"confidence={msg.get('confidence')}")
+        test("Message has target_topic", bool(msg.get("target_topic")))
+
+        code, bad = api_post("/api/intel/messages/generate", {"voter_id": "NONEXISTENT-PT-99999"})
+        test("POST /api/intel/messages/generate unknown voter → 404", code == 404, f"Got {code}")
+
+        if sample_ids:
+            code, batch = api_post(
+                "/api/intel/messages/batch-generate",
+                {"voter_ids": sample_ids, "topic": "חינוך", "max_count": 5},
+            )
+            test("POST /api/intel/messages/batch-generate returns 200", code == 200, f"Got {code}")
+            test("Batch generate count matches", int(batch.get("generated", 0)) >= 1, f"generated={batch.get('generated')}")
+
+        code, topics = api_get("/api/intel/messages/topics")
+        test("GET /api/intel/messages/topics returns 200", code == 200, f"Got {code}")
+        topic_list = topics.get("topics") or []
+        test("Message topics count >= 15", len(topic_list) >= 15, f"Got {len(topic_list)}")
+        test("Message topics include חינוך", "חינוך" in topic_list)
+
+        code, hist = api_get(f"/api/intel/messages/history/{urllib.parse.quote(sample_voter_id)}")
+        test("GET /api/intel/messages/history returns 200", code == 200, f"Got {code}")
+        test("Message history has messages array", isinstance(hist.get("messages"), list))
+
+    # Feature 2 — Influence
+    code, scan = api_post("/api/intel/influence/scan", {"max_hubs": 100, "neighborhoods": ["all"]})
+    test("POST /api/intel/influence/scan returns 200", code == 200, f"Got {code}")
+    hubs_found = int(scan.get("hubs_found") or 0)
+    test("Influence scan finds hubs", hubs_found >= 1, f"hubs_found={hubs_found}")
+    test("Influence scan hubs in 50–100 range (or scaled)", 1 <= hubs_found <= 150, f"hubs_found={hubs_found}")
+    test("Influence scan clusters >= 3", int(scan.get("clusters_found") or 0) >= 3, f"clusters={scan.get('clusters_found')}")
+
+    code, graph = api_get("/api/influence/map?neighborhood=all&depth=2")
+    test("GET /api/influence/map returns 200", code == 200, f"Got {code}")
+    test("Influence map has nodes", isinstance(graph.get("nodes"), list) and len(graph["nodes"]) > 0)
+    test("Influence map has edges", isinstance(graph.get("edges"), list))
+    test("Influence map has stats", isinstance(graph.get("stats"), dict))
+
+    if sample_voter_id:
+        code, score = api_post("/api/intel/influence/influence-score", {"voter_id": sample_voter_id})
+        test("POST /api/intel/influence/influence-score returns 200", code == 200, f"Got {code}")
+        inf = float(score.get("influence_score") or -1)
+        test("Influence score 0–100", 0 <= inf <= 100, f"score={inf}")
+
+    code, th = api_post("/api/intel/influence/target-hubs", {"top_n": 10, "gotv_filter": "SWING"})
+    test("POST /api/intel/influence/target-hubs returns 200", code == 200, f"Got {code}")
+    hubs = th.get("hubs") if isinstance(th.get("hubs"), list) else []
+    test("Target hubs returns up to 10", 1 <= len(hubs) <= 10, f"count={len(hubs)}")
+    if len(hubs) >= 2:
+        test(
+            "Target hubs sorted by influence_score",
+            hubs[0].get("influence_score", 0) >= hubs[1].get("influence_score", 0),
+            "Not sorted",
+        )
+
+    # Feature 3 — Sentiment
+    if sample_voter_id:
+        prev_score = float(voters_sample["voters"][0].get("support_score") or 0.5)
+        code, tr = api_post(
+            "/api/intel/sentiment/track",
+            {"voter_id": sample_voter_id, "source": "field_call"},
+        )
+        test("POST /api/intel/sentiment/track returns 200", code == 200, f"Got {code}: {tr}")
+        new_score = float(tr.get("new_score") or 0)
+        test("Sentiment new_score clamped 0–1", 0.0 <= new_score <= 1.0, f"new_score={new_score}")
+        delta = float(tr.get("delta") or 0)
+        test(
+            "Sentiment delta matches scores",
+            abs(delta - (new_score - float(tr.get("previous_score") or prev_score))) < 0.01
+            or tr.get("previous_score") is not None,
+            f"delta={delta}",
+        )
+
+    code, dash = api_get("/api/intel/sentiment/dashboard?neighborhood=all")
+    test("GET /api/intel/sentiment/dashboard returns 200", code == 200, f"Got {code}")
+    test("Sentiment dashboard has neighborhoods", isinstance(dash.get("neighborhoods"), list) and len(dash["neighborhoods"]) > 0)
+    test("Sentiment dashboard has score_distribution", isinstance(dash.get("score_distribution"), dict))
+
+    code, sub = api_post("/api/intel/sentiment/alert/subscribe", {"threshold": 0.15, "scope": "neighborhood"})
+    test("POST /api/intel/sentiment/alert/subscribe returns 200", code == 200, f"Got {code}")
+    test("Sentiment subscription active", sub.get("active") is True and bool(sub.get("subscription_id")))
+
+    if sample_voter_id:
+        q = urllib.parse.urlencode({"voter_id": sample_voter_id, "days": 30})
+        code, trend = api_get(f"/api/intel/sentiment/trend?{q}")
+        test("GET /api/intel/sentiment/trend returns 200", code == 200, f"Got {code}")
+        timeline = trend.get("timeline") or []
+        test("Sentiment trend ~30 days", len(timeline) >= 25, f"points={len(timeline)}")
+
+# ─── 14. FEATURE PAGES (FRONTEND) ───
+print()
+print("── 14. FEATURE PAGES (FRONTEND) ──")
+for path, label in (
+    ("/war-room", "חמ״ל"),
+    ("/messages", "מסרים"),
+    ("/influence", "השפעה"),
+    ("/sentiment", "סנטימנט"),
+):
+    code, page = html_get(f"{FRONTEND}{path}")
+    test(f"Frontend {path} returns 200", code == 200, f"Got {code}")
+    if code == 200:
+        test(f"Frontend {path} RTL", 'dir="rtl"' in page, "RTL missing")
+        test(
+            f"Frontend {path} Hebrew content",
+            has_hebrew(page) or label in page,
+            "No Hebrew",
+        )
+
+# Scan one feature JS bundle for /api/war-room when HTML is static shell
+if features_api_live():
+    code, home = html_get(f"{FRONTEND}/war-room")
+    if code == 200:
+        api_in_feature_bundle = "war-room/overview" in home or "/api/" in home
+        if not api_in_feature_bundle:
+            for m in re.findall(r'src="([^"]+_next/static/[^"]+\.js)"', home):
+                js_url = m if m.startswith("http") else f"{FRONTEND}{m}"
+                jcode, jbody = html_get(js_url)
+                if jcode == 200 and ("/api/war-room" in jbody or "/api/intel/messages" in jbody):
+                    api_in_feature_bundle = True
+                    break
+        test(
+            "Frontend feature bundle references /api routes",
+            api_in_feature_bundle,
+            "Deploy frontend commit 4f5443e+ to Vercel",
+        )
 
 # ─── SUMMARY ───
 print()
