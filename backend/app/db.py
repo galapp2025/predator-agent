@@ -61,6 +61,35 @@ else:
 
 metadata = MetaData()
 
+whatsapp_messages = Table(
+    "whatsapp_messages",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("voter_id", String(64), nullable=False),
+    Column("variant", String(32), nullable=False),
+    Column("message_text", Text, nullable=False),
+    Column("style", String(64), default=""),
+    Column("personalization_score", Float, default=0.0),
+    Column("created_at", Text, nullable=True),
+    Column("scheduled_at", Text, nullable=True),
+    Column("sent_at", Text, nullable=True),
+    Column("campaign_topic", Text, default=""),
+)
+
+turnout_predictions = Table(
+    "turnout_predictions",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("scope", String(64), default=""),
+    Column("predicted_turnout", Float, default=0.0),
+    Column("ci_lower", Float, default=0.0),
+    Column("ci_upper", Float, default=0.0),
+    Column("simulations", Integer, default=10000),
+    Column("generated_at", Text, nullable=True),
+    Column("parameters", Text, default=""),
+    Column("result_json", Text, default=""),
+)
+
 voters = Table(
     "voters",
     metadata,
@@ -81,6 +110,53 @@ voters = Table(
     Column("enriched_at", Text, nullable=True),
     Column("created_at", Text, nullable=True),
     Column("updated_at", Text, nullable=True),
+)
+
+sentiment_history = Table(
+    "sentiment_history",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("voter_id", String(64), nullable=False),
+    Column("score", Float, nullable=False),
+    Column("source", String(64), default=""),
+    Column("delta", Float, default=0.0),
+    Column("neighborhood", String(255), default=""),
+    Column("timestamp", Text, nullable=False),
+)
+
+generated_messages = Table(
+    "generated_messages",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("voter_id", String(64), nullable=False),
+    Column("channel", String(32), nullable=False),
+    Column("text", Text, nullable=False),
+    Column("target_topic", String(64), default=""),
+    Column("confidence", Float, default=0.0),
+    Column("timestamp", Text, nullable=False),
+)
+
+sentiment_subscriptions = Table(
+    "sentiment_subscriptions",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("webhook_url", Text, default=""),
+    Column("threshold", Float, default=0.15),
+    Column("scope", String(32), default="neighborhood"),
+    Column("active", Integer, default=1),
+    Column("created_at", Text, nullable=True),
+)
+
+gotv_daily_snapshots = Table(
+    "gotv_daily_snapshots",
+    metadata,
+    Column("snapshot_date", String(10), primary_key=True),
+    Column("safe", Integer, default=0),
+    Column("leaning", Integer, default=0),
+    Column("swing", Integer, default=0),
+    Column("at_risk", Integer, default=0),
+    Column("lost", Integer, default=0),
+    Column("created_at", Text, nullable=True),
 )
 
 VOTER_COLUMNS = (
@@ -133,6 +209,154 @@ async def init_db() -> None:
         await conn.run_sync(metadata.create_all)
         await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_voters_name ON voters (first_name, last_name)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_voters_category ON voters (gotv_category)"))
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_sentiment_voter ON sentiment_history (voter_id)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_messages_voter ON generated_messages (voter_id)")
+        )
+
+
+async def resolve_voter(voter_id: str) -> dict[str, Any] | None:
+    row = await get_voter(voter_id)
+    if row:
+        return row
+    async with _session_factory()() as db:
+        stmt = select(voters).where(voters.c.id.like(f"%{voter_id[-8:]}%")).limit(1)
+        found = (await db.execute(stmt)).mappings().first()
+        return dict(found) if found else None
+
+
+async def insert_sentiment_event(
+    *,
+    event_id: str,
+    voter_id: str,
+    score: float,
+    source: str,
+    delta: float,
+    neighborhood: str,
+    timestamp: str,
+) -> None:
+    async with _session_factory()() as db:
+        await db.execute(
+            sentiment_history.insert().values(
+                id=event_id,
+                voter_id=voter_id,
+                score=score,
+                source=source,
+                delta=delta,
+                neighborhood=neighborhood,
+                timestamp=timestamp,
+            )
+        )
+        await db.commit()
+
+
+async def list_sentiment_history(voter_id: str, limit: int = 100) -> list[dict[str, Any]]:
+    async with _session_factory()() as db:
+        stmt = (
+            select(sentiment_history)
+            .where(sentiment_history.c.voter_id == voter_id)
+            .order_by(sentiment_history.c.timestamp.desc())
+            .limit(limit)
+        )
+        rows = (await db.execute(stmt)).mappings().all()
+        return [dict(r) for r in rows]
+
+
+async def insert_generated_message(
+    *,
+    message_id: str,
+    voter_id: str,
+    channel: str,
+    text: str,
+    target_topic: str,
+    confidence: float,
+    timestamp: str,
+) -> None:
+    async with _session_factory()() as db:
+        await db.execute(
+            generated_messages.insert().values(
+                id=message_id,
+                voter_id=voter_id,
+                channel=channel,
+                text=text,
+                target_topic=target_topic,
+                confidence=confidence,
+                timestamp=timestamp,
+            )
+        )
+        await db.commit()
+
+
+async def list_generated_messages(voter_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    async with _session_factory()() as db:
+        stmt = (
+            select(generated_messages)
+            .where(generated_messages.c.voter_id == voter_id)
+            .order_by(generated_messages.c.timestamp.desc())
+            .limit(limit)
+        )
+        rows = (await db.execute(stmt)).mappings().all()
+        return [dict(r) for r in rows]
+
+
+async def insert_sentiment_subscription(
+    *,
+    subscription_id: str,
+    webhook_url: str,
+    threshold: float,
+    scope: str,
+) -> None:
+    async with _session_factory()() as db:
+        await db.execute(
+            sentiment_subscriptions.insert().values(
+                id=subscription_id,
+                webhook_url=webhook_url,
+                threshold=threshold,
+                scope=scope,
+                active=1,
+                created_at=datetime.now(UTC).isoformat(),
+            )
+        )
+        await db.commit()
+
+
+async def upsert_gotv_snapshot(counts: dict[str, int]) -> None:
+    day = datetime.now(UTC).strftime("%Y-%m-%d")
+    now = datetime.now(UTC).isoformat()
+    async with _session_factory()() as db:
+        await db.execute(
+            text(
+                """
+                INSERT INTO gotv_daily_snapshots (snapshot_date, safe, leaning, swing, at_risk, lost, created_at)
+                VALUES (:d, :safe, :leaning, :swing, :at_risk, :lost, :ts)
+                ON CONFLICT(snapshot_date) DO UPDATE SET
+                  safe=excluded.safe, leaning=excluded.leaning, swing=excluded.swing,
+                  at_risk=excluded.at_risk, lost=excluded.lost, created_at=excluded.created_at
+                """
+            ),
+            {
+                "d": day,
+                "safe": counts.get("safe", 0),
+                "leaning": counts.get("leaning", 0),
+                "swing": counts.get("swing", 0),
+                "at_risk": counts.get("at_risk", 0),
+                "lost": counts.get("lost", 0),
+                "ts": now,
+            },
+        )
+        await db.commit()
+
+
+async def gotv_snapshot_on_date(date_str: str) -> dict[str, Any] | None:
+    async with _session_factory()() as db:
+        row = (
+            await db.execute(
+                select(gotv_daily_snapshots).where(gotv_daily_snapshots.c.snapshot_date == date_str)
+            )
+        ).mappings().first()
+        return dict(row) if row else None
 
 
 async def list_voters(
@@ -217,3 +441,54 @@ async def update_voter(voter_id: str, fields: dict[str, Any]) -> dict[str, Any] 
 async def all_voters() -> list[dict[str, Any]]:
     rows, _ = await list_voters(limit=100_000, offset=0)
     return rows
+
+
+async def insert_whatsapp_message(data: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now(UTC).isoformat()
+    payload = {
+        "id": data["id"],
+        "voter_id": data["voter_id"],
+        "variant": data["variant"],
+        "message_text": data["message_text"],
+        "style": data.get("style", ""),
+        "personalization_score": float(data.get("personalization_score") or 0),
+        "created_at": data.get("created_at") or now,
+        "scheduled_at": data.get("scheduled_at"),
+        "sent_at": data.get("sent_at"),
+        "campaign_topic": data.get("campaign_topic", ""),
+    }
+    async with _session_factory()() as db:
+        await db.execute(whatsapp_messages.insert().values(**payload))
+        await db.commit()
+    return payload
+
+
+async def list_whatsapp_messages(voter_id: str) -> list[dict[str, Any]]:
+    async with _session_factory()() as db:
+        rows = (
+            await db.execute(
+                select(whatsapp_messages)
+                .where(whatsapp_messages.c.voter_id == voter_id)
+                .order_by(whatsapp_messages.c.created_at.desc())
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+
+async def insert_turnout_prediction(data: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now(UTC).isoformat()
+    payload = {
+        "id": data["id"],
+        "scope": data.get("scope", ""),
+        "predicted_turnout": float(data.get("predicted_turnout") or 0),
+        "ci_lower": float(data.get("ci_lower") or 0),
+        "ci_upper": float(data.get("ci_upper") or 0),
+        "simulations": int(data.get("simulations") or 10000),
+        "generated_at": data.get("generated_at") or now,
+        "parameters": data.get("parameters", ""),
+        "result_json": data.get("result_json", ""),
+    }
+    async with _session_factory()() as db:
+        await db.execute(turnout_predictions.insert().values(**payload))
+        await db.commit()
+    return payload

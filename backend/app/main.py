@@ -19,6 +19,12 @@ from pydantic import ValidationError
 from app import db, services
 from app.intelligence.api_integration import get_pipeline
 from app.intelligence.auth import AuthMiddleware, RateLimiter
+from app.intelligence.prediction_engine import router as prediction_router
+from app.intelligence.whatsapp_writer import router as whatsapp_router
+from app.intelligence.influence import router as influence_router
+from app.intelligence.messaging import router as messaging_router
+from app.intelligence.sentiment_tracker import router as sentiment_router
+from app.intelligence.war_room import router as war_room_router
 from app.schemas import (
     AgentsResponse,
     AgentInfo,
@@ -81,6 +87,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(war_room_router, prefix="/api")
+app.include_router(messaging_router, prefix="/api")
+app.include_router(sentiment_router, prefix="/api")
+app.include_router(influence_router, prefix="/api")
+app.include_router(whatsapp_router, prefix="/api")
+app.include_router(prediction_router, prefix="/api")
 
 
 @app.middleware("http")
