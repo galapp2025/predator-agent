@@ -283,7 +283,8 @@ def battle_plan_payload(profiles: list[GOTVProfile]) -> dict[str, Any]:
 
 
 async def persist_gotv(profiles: list[GOTVProfile], name_to_id: dict[str, str]) -> None:
-    now = datetime.now(UTC).isoformat()
+    now = datetime.now(UTC)
+    enriched = now.isoformat() if db.IS_SQLITE else now
     for profile in profiles:
         voter_id = name_to_id.get(profile.name)
         if not voter_id:

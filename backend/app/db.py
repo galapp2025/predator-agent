@@ -477,6 +477,8 @@ async def find_by_name(first_name: str, last_name: str) -> dict[str, Any] | None
 
 def _coerce_voter_write_value(key: str, value: Any) -> Any:
     if key in ("enriched_at", "created_at", "updated_at") and value is not None and not IS_SQLITE:
+        if hasattr(value, "isoformat") and not isinstance(value, str):
+            return value
         if isinstance(value, str):
             try:
                 return datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -504,7 +506,10 @@ async def update_voter(voter_id: str, fields: dict[str, Any]) -> dict[str, Any] 
     allowed = {k: v for k, v in fields.items() if k in VOTER_COLUMNS and k != "id" and v is not None}
     if not allowed:
         return await get_voter(voter_id)
-    allowed["updated_at"] = datetime.now(UTC).isoformat()
+    if IS_SQLITE:
+        allowed["updated_at"] = datetime.now(UTC).isoformat()
+    else:
+        allowed["updated_at"] = datetime.now(UTC)
     payload = {k: _coerce_voter_write_value(k, v) for k, v in allowed.items()}
     async with _session_factory()() as db:
         await db.execute(voters.update().where(_voter_id_filter(voter_id)).values(**payload))
