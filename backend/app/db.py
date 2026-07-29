@@ -123,7 +123,7 @@ sentiment_history = Table(
     Column("source", String(64), default=""),
     Column("delta", Float, default=0.0),
     Column("neighborhood", String(255), default=""),
-    Column("timestamp", Text, nullable=False),
+    Column("recorded_at", Text, nullable=False),
 )
 
 generated_messages = Table(
@@ -159,6 +159,52 @@ gotv_daily_snapshots = Table(
     Column("at_risk", Integer, default=0),
     Column("lost", Integer, default=0),
     Column("created_at", Text, nullable=True),
+)
+
+psychological_profiles = Table(
+    "psychological_profiles",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("voter_id", String(64), nullable=False, unique=True),
+    Column("socio_economic_tier", Integer, default=5),
+    Column("socio_economic_indicators", Text, default=""),
+    Column("personality_traits", Text, default=""),
+    Column("communication_style", Text, default=""),
+    Column("persuasion_levers", Text, default=""),
+    Column("recommended_approach", Text, default=""),
+    Column("loyalty_score", Float, default=0.0),
+    Column("volatility_score", Float, default=0.0),
+    Column("influenceability_score", Float, default=0.0),
+    Column("emotional_triggers", Text, default=""),
+    Column("core_values", Text, default=""),
+    Column("decision_style", Text, default=""),
+    Column("authority_response", Text, default=""),
+    Column("social_proof_sensitivity", Text, default=""),
+    Column("scarcity_response", Text, default=""),
+    Column("reciprocity_response", Text, default=""),
+    Column("generated_at", Text, nullable=True),
+    Column("osint_sources", Text, default=""),
+    Column("confidence", Float, default=0.0),
+    Column("profile_json", Text, default=""),
+)
+
+generated_content = Table(
+    "generated_content",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("voter_id", String(64), nullable=False),
+    Column("format", String(64), nullable=False),
+    Column("text", Text, nullable=False),
+    Column("tone", Text, default=""),
+    Column("target_emotion", Text, default=""),
+    Column("persuasion_lever_used", Text, default=""),
+    Column("character_count", Integer, default=0),
+    Column("engagement_score", Float, default=0.0),
+    Column("psychological_profile_id", String(64), default=""),
+    Column("created_at", Text, nullable=True),
+    Column("campaign_topic", Text, default=""),
+    Column("language", String(8), default="he"),
+    Column("campaign_id", String(64), default=""),
 )
 
 candidate_dossiers = Table(
@@ -313,11 +359,9 @@ def normalize_voter_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def _voter_id_filter(voter_id: str):
     vid = str(voter_id).strip()
-    if not vid:
-        return voters.c.id == vid
     if IS_SQLITE:
         return voters.c.id == vid
-    return or_(voters.c.id == vid, cast(voters.c.id, String) == vid)
+    return cast(voters.c.id, String) == vid
 
 
 _engine: AsyncEngine | None = None
@@ -348,6 +392,17 @@ async def init_db() -> None:
     engine = _get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
+        if not IS_SQLITE:
+            await conn.execute(
+                text(
+                    """
+                    DO $$ BEGIN
+                      ALTER TABLE sentiment_history ADD COLUMN IF NOT EXISTS recorded_at TEXT;
+                    EXCEPTION WHEN undefined_table THEN NULL;
+                    END $$
+                    """
+                )
+            )
         await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_voters_name ON voters (first_name, last_name)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_voters_category ON voters (gotv_category)"))
         await conn.execute(
@@ -355,6 +410,15 @@ async def init_db() -> None:
         )
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS idx_messages_voter ON generated_messages (voter_id)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_psycho_voter ON psychological_profiles (voter_id)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_content_voter ON generated_content (voter_id)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_content_campaign ON generated_content (campaign_id)")
         )
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS idx_dossiers_status ON candidate_dossiers (status)")
@@ -368,13 +432,7 @@ async def init_db() -> None:
 
 
 async def resolve_voter(voter_id: str) -> dict[str, Any] | None:
-    row = await get_voter(voter_id)
-    if row:
-        return row
-    async with _session_factory()() as db:
-        stmt = select(voters).where(voters.c.id.like(f"%{voter_id[-8:]}%")).limit(1)
-        found = (await db.execute(stmt)).mappings().first()
-        return dict(found) if found else None
+    return await get_voter(voter_id)
 
 
 async def insert_sentiment_event(
@@ -396,7 +454,7 @@ async def insert_sentiment_event(
                 source=source,
                 delta=delta,
                 neighborhood=neighborhood,
-                timestamp=timestamp,
+                recorded_at=timestamp,
             )
         )
         await db.commit()
@@ -407,7 +465,7 @@ async def list_sentiment_history(voter_id: str, limit: int = 100) -> list[dict[s
         stmt = (
             select(sentiment_history)
             .where(sentiment_history.c.voter_id == voter_id)
-            .order_by(sentiment_history.c.timestamp.desc())
+            .order_by(sentiment_history.c.recorded_at.desc())
             .limit(limit)
         )
         rows = (await db.execute(stmt)).mappings().all()
@@ -540,13 +598,16 @@ async def list_voters(
             list_stmt = list_stmt.where(f)
         total = int((await db.execute(count_stmt)).scalar_one())
         rows = (await db.execute(list_stmt)).mappings().all()
-        return [dict(r) for r in rows], total
+        normalized = [normalize_voter_row(dict(r)) for r in rows]
+        return [r for r in normalized if r], total
 
 
 async def get_voter(voter_id: str) -> dict[str, Any] | None:
     async with _session_factory()() as db:
-        row = (await db.execute(select(voters).where(voters.c.id == voter_id))).mappings().first()
-        return dict(row) if row else None
+        row = (
+            await db.execute(select(voters).where(_voter_id_filter(voter_id)).limit(1))
+        ).mappings().first()
+        return normalize_voter_row(dict(row) if row else None)
 
 
 async def find_by_name(first_name: str, last_name: str) -> dict[str, Any] | None:
@@ -561,7 +622,21 @@ async def find_by_name(first_name: str, last_name: str) -> dict[str, Any] | None
                 .limit(1)
             )
         ).mappings().first()
-        return dict(row) if row else None
+        return normalize_voter_row(dict(row) if row else None)
+
+
+def _coerce_voter_write_value(key: str, value: Any) -> Any:
+    if key in ("enriched_at", "created_at", "updated_at") and value is not None and not IS_SQLITE:
+        if hasattr(value, "isoformat") and not isinstance(value, str):
+            return value
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return value
+    if key == "gotv_priority" and value is not None:
+        return int(round(float(value)))
+    return value
 
 
 async def insert_voter(data: dict[str, Any]) -> dict[str, Any]:
@@ -581,9 +656,13 @@ async def update_voter(voter_id: str, fields: dict[str, Any]) -> dict[str, Any] 
     allowed = {k: v for k, v in fields.items() if k in VOTER_COLUMNS and k != "id" and v is not None}
     if not allowed:
         return await get_voter(voter_id)
-    allowed["updated_at"] = datetime.now(UTC).isoformat()
+    if IS_SQLITE:
+        allowed["updated_at"] = datetime.now(UTC).isoformat()
+    else:
+        allowed["updated_at"] = datetime.now(UTC)
+    payload = {k: _coerce_voter_write_value(k, v) for k, v in allowed.items()}
     async with _session_factory()() as db:
-        await db.execute(voters.update().where(voters.c.id == voter_id).values(**allowed))
+        await db.execute(voters.update().where(_voter_id_filter(voter_id)).values(**payload))
         await db.commit()
     return await get_voter(voter_id)
 
@@ -918,3 +997,118 @@ async def insert_trend_alert_subscription(data: dict[str, Any]) -> dict[str, Any
     out = dict(payload)
     out["alert_types"] = _json_loads(out["alert_types"], [])
     return out
+
+
+async def upsert_psychological_profile(data: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now(UTC).isoformat()
+    payload = {
+        "id": data["id"],
+        "voter_id": str(data["voter_id"]),
+        "socio_economic_tier": int(data.get("socio_economic_tier") or 5),
+        "socio_economic_indicators": data.get("socio_economic_indicators", ""),
+        "personality_traits": data.get("personality_traits", ""),
+        "communication_style": data.get("communication_style", ""),
+        "persuasion_levers": data.get("persuasion_levers", ""),
+        "recommended_approach": data.get("recommended_approach", ""),
+        "loyalty_score": float(data.get("loyalty_score") or 0),
+        "volatility_score": float(data.get("volatility_score") or 0),
+        "influenceability_score": float(data.get("influenceability_score") or 0),
+        "emotional_triggers": data.get("emotional_triggers", ""),
+        "core_values": data.get("core_values", ""),
+        "decision_style": data.get("decision_style", ""),
+        "authority_response": data.get("authority_response", ""),
+        "social_proof_sensitivity": data.get("social_proof_sensitivity", ""),
+        "scarcity_response": data.get("scarcity_response", ""),
+        "reciprocity_response": data.get("reciprocity_response", ""),
+        "generated_at": data.get("generated_at") or now,
+        "osint_sources": data.get("osint_sources", ""),
+        "confidence": float(data.get("confidence") or 0),
+        "profile_json": data.get("profile_json", ""),
+    }
+    async with _session_factory()() as db:
+        existing = (
+            await db.execute(
+                select(psychological_profiles)
+                .where(psychological_profiles.c.voter_id == payload["voter_id"])
+                .limit(1)
+            )
+        ).mappings().first()
+        if existing:
+            payload["id"] = existing["id"]
+            update_fields = {k: v for k, v in payload.items() if k != "id"}
+            await db.execute(
+                psychological_profiles.update()
+                .where(psychological_profiles.c.id == existing["id"])
+                .values(**update_fields)
+            )
+        else:
+            await db.execute(psychological_profiles.insert().values(**payload))
+        await db.commit()
+    return payload
+
+
+async def get_psychological_profile(voter_id: str) -> dict[str, Any] | None:
+    async with _session_factory()() as db:
+        row = (
+            await db.execute(
+                select(psychological_profiles)
+                .where(psychological_profiles.c.voter_id == str(voter_id))
+                .limit(1)
+            )
+        ).mappings().first()
+        return dict(row) if row else None
+
+
+async def list_psychological_profiles(*, limit: int = 5000) -> list[dict[str, Any]]:
+    async with _session_factory()() as db:
+        rows = (await db.execute(select(psychological_profiles).limit(limit))).mappings().all()
+        return [dict(r) for r in rows]
+
+
+async def insert_generated_content(data: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now(UTC).isoformat()
+    payload = {
+        "id": data["id"],
+        "voter_id": str(data["voter_id"]),
+        "format": data["format"],
+        "text": data["text"],
+        "tone": data.get("tone", ""),
+        "target_emotion": data.get("target_emotion", ""),
+        "persuasion_lever_used": data.get("persuasion_lever_used", ""),
+        "character_count": int(data.get("character_count") or len(data.get("text") or "")),
+        "engagement_score": float(data.get("engagement_score") or 0),
+        "psychological_profile_id": data.get("psychological_profile_id", ""),
+        "created_at": data.get("created_at") or now,
+        "campaign_topic": data.get("campaign_topic", ""),
+        "language": data.get("language", "he"),
+        "campaign_id": data.get("campaign_id", ""),
+    }
+    async with _session_factory()() as db:
+        await db.execute(generated_content.insert().values(**payload))
+        await db.commit()
+    return payload
+
+
+async def list_generated_content(voter_id: str, limit: int = 50) -> list[dict[str, Any]]:
+    async with _session_factory()() as db:
+        rows = (
+            await db.execute(
+                select(generated_content)
+                .where(generated_content.c.voter_id == str(voter_id))
+                .order_by(generated_content.c.created_at.desc())
+                .limit(limit)
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
+
+
+async def list_generated_content_by_campaign(campaign_id: str) -> list[dict[str, Any]]:
+    async with _session_factory()() as db:
+        rows = (
+            await db.execute(
+                select(generated_content)
+                .where(generated_content.c.campaign_id == campaign_id)
+                .order_by(generated_content.c.created_at.desc())
+            )
+        ).mappings().all()
+        return [dict(r) for r in rows]
