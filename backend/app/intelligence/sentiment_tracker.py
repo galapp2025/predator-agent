@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -11,6 +12,8 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app import db
+
+logger = logging.getLogger("blackopps.sentiment")
 
 router = APIRouter(tags=["sentiment"])
 
@@ -66,23 +69,27 @@ async def track_sentiment(body: TrackSentimentRequest) -> dict[str, Any]:
     prev = _clamp(float(voter.get("support_score") or 0.5))
     if body.new_score is not None:
         new_score = _clamp(body.new_score)
+    elif body.source == "field_call":
+        new_score = _clamp(prev - 0.05)
     else:
-        delta_hint = -0.05 if body.source == "field_call" else 0.03
-        new_score = _clamp(prev + delta_hint)
+        new_score = _clamp(prev + 0.03)
     delta = round(new_score - prev, 3)
     nb = str(voter.get("neighborhood") or voter.get("city") or "כללי")
     await db.update_voter(str(voter["id"]), {"support_score": new_score})
     event_id = secrets.token_hex(8)
     ts = datetime.now(UTC).isoformat()
-    await db.insert_sentiment_event(
-        event_id=event_id,
-        voter_id=str(voter["id"]),
-        score=new_score,
-        source=body.source,
-        delta=delta,
-        neighborhood=nb,
-        timestamp=ts,
-    )
+    try:
+        await db.insert_sentiment_event(
+            event_id=event_id,
+            voter_id=str(voter["id"]),
+            score=new_score,
+            source=body.source,
+            delta=delta,
+            neighborhood=nb,
+            timestamp=ts,
+        )
+    except Exception:
+        logger.exception("sentiment history insert failed")
     alert_triggered = delta <= -0.15 or (prev >= 0.6 and new_score < 0.4)
     alert_type = "VOTER_FLIPPING" if alert_triggered else None
     nb_impact = {"name": nb, "score_change": round(delta / max(await _nb_voter_count(nb), 1), 4)}

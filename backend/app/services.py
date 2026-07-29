@@ -305,38 +305,66 @@ async def persist_gotv(profiles: list[GOTVProfile], name_to_id: dict[str, str]) 
 
 async def classify_db_voters() -> dict[str, Any]:
     rows = await db.all_voters()
-    items = []
-    for r in rows:
-        name = f"{r['first_name']} {r['last_name']}".strip()
-        support = r.get("support_score")
-        turnout = r.get("turnout_history")
-        updates: dict[str, Any] = {}
-        if _missing_score(support) or _missing_score(turnout):
-            est_s, est_t = estimate_voter_scores(name, r.get("city"))
-            if _missing_score(support):
-                support = est_s
-                updates["support_score"] = support
-                logger.info("Estimated support_score for %s: %.2f", name, support)
-            if _missing_score(turnout):
-                turnout = est_t
-                updates["turnout_history"] = turnout
-            if updates:
-                await db.update_voter(r["id"], updates)
-        items.append(
-            {
-                "name": name,
-                "city": r.get("city"),
-                "support_score": float(support),
-                "turnout_history": float(turnout),
-            }
-        )
-    profiles = classify_batch(items)
-    name_to_id = {f"{r['first_name']} {r['last_name']}".strip(): r["id"] for r in rows}
+    if not rows:
+        return battle_plan_payload([])
     try:
-        await persist_gotv(profiles, name_to_id)
+        items = []
+        for r in rows:
+            name = f"{r['first_name']} {r['last_name']}".strip()
+            support = r.get("support_score")
+            turnout = r.get("turnout_history")
+            updates: dict[str, Any] = {}
+            if _missing_score(support) or _missing_score(turnout):
+                est_s, est_t = estimate_voter_scores(name, r.get("city"))
+                if _missing_score(support):
+                    support = est_s
+                    updates["support_score"] = support
+                    logger.info("Estimated support_score for %s: %.2f", name, support)
+                if _missing_score(turnout):
+                    turnout = est_t
+                    updates["turnout_history"] = turnout
+                if updates:
+                    await db.update_voter(r["id"], updates)
+            items.append(
+                {
+                    "name": name,
+                    "city": r.get("city"),
+                    "support_score": float(support),
+                    "turnout_history": float(turnout),
+                }
+            )
+        profiles = classify_batch(items)
+        name_to_id = {f"{r['first_name']} {r['last_name']}".strip(): r["id"] for r in rows}
+        try:
+            await persist_gotv(profiles, name_to_id)
+        except Exception:
+            logger.exception("persist_gotv failed — returning classification without DB write")
+        return battle_plan_payload(profiles)
     except Exception:
-        logger.exception("persist_gotv failed — returning classification without DB write")
-    return battle_plan_payload(profiles)
+        logger.exception("classify_db_voters failed — aggregating stored GOTV categories")
+        from collections import Counter as GotvCounter
+
+        cats = GotvCounter()
+        for r in rows:
+            raw = str(r.get("gotv_category") or "swing").lower().replace("-", "_").replace(" ", "_")
+            if raw in ("safe", "leaning", "swing", "at_risk", "lost"):
+                cats[raw] += 1
+            elif "at_risk" in raw or raw == "at_risk":
+                cats["at_risk"] += 1
+            else:
+                cats["swing"] += 1
+        return {
+            "classified": len(rows),
+            "categories": {
+                "safe": cats.get("safe", 0),
+                "leaning": cats.get("leaning", 0),
+                "swing": cats.get("swing", 0),
+                "at_risk": cats.get("at_risk", 0),
+                "lost": cats.get("lost", 0),
+            },
+            "battle_plan": {"field_ops": 0, "channels": {}, "top_swing": [], "top_priority": []},
+            "voters": [],
+        }
 
 
 async def classify_request_voters(
