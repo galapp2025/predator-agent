@@ -299,7 +299,7 @@ async def persist_gotv(profiles: list[GOTVProfile], name_to_id: dict[str, str]) 
                 else str(profile.optimal_channel),
                 "gotv_frequency": profile.contact_frequency,
                 "gotv_message": profile.messaging_frame,
-                "enriched_at": now,
+                "enriched_at": enriched,
             },
         )
 

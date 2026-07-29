@@ -75,7 +75,10 @@ async def track_sentiment(body: TrackSentimentRequest) -> dict[str, Any]:
         new_score = _clamp(prev + 0.03)
     delta = round(new_score - prev, 3)
     nb = str(voter.get("neighborhood") or voter.get("city") or "כללי")
-    await db.update_voter(str(voter["id"]), {"support_score": new_score})
+    try:
+        await db.update_voter(str(voter["id"]), {"support_score": new_score})
+    except Exception:
+        logger.exception("support_score update failed")
     event_id = secrets.token_hex(8)
     ts = datetime.now(UTC).isoformat()
     try:
