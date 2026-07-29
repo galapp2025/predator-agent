@@ -185,7 +185,7 @@ async def sentiment_trend(
         day = (datetime.now(UTC) - timedelta(days=days - i)).strftime("%Y-%m-%d")
         score = base
         for h in history:
-            if str(h.get("timestamp", "")).startswith(day):
+            if str(h.get("recorded_at") or h.get("timestamp") or "").startswith(day):
                 score = _clamp(float(h.get("score") or score))
         timeline.append({"date": day, "score": round(score, 2)})
     delta_30 = round(timeline[-1]["score"] - timeline[0]["score"], 2) if timeline else 0.0

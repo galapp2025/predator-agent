@@ -332,7 +332,10 @@ async def classify_db_voters() -> dict[str, Any]:
         )
     profiles = classify_batch(items)
     name_to_id = {f"{r['first_name']} {r['last_name']}".strip(): r["id"] for r in rows}
-    await persist_gotv(profiles, name_to_id)
+    try:
+        await persist_gotv(profiles, name_to_id)
+    except Exception:
+        logger.exception("persist_gotv failed — returning classification without DB write")
     return battle_plan_payload(profiles)
 
 

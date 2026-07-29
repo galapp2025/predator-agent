@@ -122,7 +122,7 @@ sentiment_history = Table(
     Column("source", String(64), default=""),
     Column("delta", Float, default=0.0),
     Column("neighborhood", String(255), default=""),
-    Column("timestamp", Text, nullable=False),
+    Column("recorded_at", Text, nullable=False),
 )
 
 generated_messages = Table(
@@ -260,6 +260,17 @@ async def init_db() -> None:
     engine = _get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
+        if not IS_SQLITE:
+            await conn.execute(
+                text(
+                    """
+                    DO $$ BEGIN
+                      ALTER TABLE sentiment_history ADD COLUMN IF NOT EXISTS recorded_at TEXT;
+                    EXCEPTION WHEN undefined_table THEN NULL;
+                    END $$
+                    """
+                )
+            )
         await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_voters_name ON voters (first_name, last_name)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_voters_category ON voters (gotv_category)"))
         await conn.execute(
@@ -293,7 +304,7 @@ async def insert_sentiment_event(
                 source=source,
                 delta=delta,
                 neighborhood=neighborhood,
-                timestamp=timestamp,
+                recorded_at=timestamp,
             )
         )
         await db.commit()
@@ -303,8 +314,8 @@ async def list_sentiment_history(voter_id: str, limit: int = 100) -> list[dict[s
     async with _session_factory()() as db:
         stmt = (
             select(sentiment_history)
-            .where(sentiment_history.c.voter_id == voter_id)
-            .order_by(sentiment_history.c.timestamp.desc())
+            .where(_voter_id_filter(voter_id))
+            .order_by(sentiment_history.c.recorded_at.desc())
             .limit(limit)
         )
         rows = (await db.execute(stmt)).mappings().all()
