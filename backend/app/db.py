@@ -18,6 +18,7 @@ from sqlalchemy import (
     Text,
     cast,
     func,
+    or_,
     select,
     text,
 )
@@ -122,7 +123,7 @@ sentiment_history = Table(
     Column("source", String(64), default=""),
     Column("delta", Float, default=0.0),
     Column("neighborhood", String(255), default=""),
-    Column("recorded_at", Text, nullable=False),
+    Column("timestamp", Text, nullable=False),
 )
 
 generated_messages = Table(
@@ -157,6 +158,91 @@ gotv_daily_snapshots = Table(
     Column("swing", Integer, default=0),
     Column("at_risk", Integer, default=0),
     Column("lost", Integer, default=0),
+    Column("created_at", Text, nullable=True),
+)
+
+candidate_dossiers = Table(
+    "candidate_dossiers",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("candidate_name", String(255), nullable=False),
+    Column("party", String(255), nullable=False),
+    Column("role", String(255), default=""),
+    Column("bio", Text, default=""),
+    Column("platform", Text, default="{}"),
+    Column("strengths", Text, default="[]"),
+    Column("weaknesses", Text, default="[]"),
+    Column("target_demographics", Text, default="{}"),
+    Column("opponent_analysis", Text, default="{}"),
+    Column("key_messages", Text, default="[]"),
+    Column("campaign_strategy", Text, default=""),
+    Column("campaign_slogans", Text, default="[]"),
+    Column("talking_points", Text, default="{}"),
+    Column("red_lines", Text, default="[]"),
+    Column("endorsements", Text, default="{}"),
+    Column("raw_text", Text, default=""),
+    Column("source_filename", String(512), default=""),
+    Column("source_file_type", String(32), default=""),
+    Column("version", Integer, default=1),
+    Column("status", String(32), default="active"),
+    Column("confidence", Float, default=0.0),
+    Column("created_at", Text, nullable=True),
+    Column("updated_at", Text, nullable=True),
+)
+
+trend_events = Table(
+    "trend_events",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("title", Text, nullable=False),
+    Column("description", Text, default=""),
+    Column("source_urls", Text, default="[]"),
+    Column("platform", String(64), default=""),
+    Column("sentiment", String(32), default="NEUTRAL"),
+    Column("classification", String(32), default="NEUTRAL_MENTION"),
+    Column("impact_score", Float, default=0.0),
+    Column("reach_estimate", Integer, default=0),
+    Column("related_candidate", String(255), default=""),
+    Column("related_opponent", String(255), default=""),
+    Column("key_narrative", Text, default=""),
+    Column("detected_at", Text, nullable=True),
+    Column("tags", Text, default="[]"),
+    Column("status", String(32), default="active"),
+    Column("raw_data", Text, default=""),
+    Column("candidate_id", String(64), default=""),
+)
+
+strategic_responses = Table(
+    "strategic_responses",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("trend_event_id", String(64), nullable=False),
+    Column("response_type", String(32), nullable=False),
+    Column("target_audience", Text, default=""),
+    Column("gotv_category", String(32), default=""),
+    Column("headline", Text, nullable=False),
+    Column("full_text", Text, nullable=False),
+    Column("talking_point_used", Text, default=""),
+    Column("counter_narrative", Text, default=""),
+    Column("expected_impact", Float, default=0.0),
+    Column("risk_level", Float, default=0.0),
+    Column("channels", Text, default="[]"),
+    Column("voter_segment", Text, default="{}"),
+    Column("gotv_variants", Text, default="{}"),
+    Column("generated_at", Text, nullable=True),
+    Column("approved", Integer, default=0),
+)
+
+trend_alert_subscriptions = Table(
+    "trend_alert_subscriptions",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("candidate_id", String(64), default=""),
+    Column("alert_types", Text, default="[]"),
+    Column("min_impact", Float, default=0.6),
+    Column("webhook_url", Text, default=""),
+    Column("email", String(255), default=""),
+    Column("status", String(32), default="active"),
     Column("created_at", Text, nullable=True),
 )
 
@@ -227,9 +313,11 @@ def normalize_voter_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def _voter_id_filter(voter_id: str):
     vid = str(voter_id).strip()
+    if not vid:
+        return voters.c.id == vid
     if IS_SQLITE:
         return voters.c.id == vid
-    return cast(voters.c.id, String) == vid
+    return or_(voters.c.id == vid, cast(voters.c.id, String) == vid)
 
 
 _engine: AsyncEngine | None = None
@@ -260,17 +348,6 @@ async def init_db() -> None:
     engine = _get_engine()
     async with engine.begin() as conn:
         await conn.run_sync(metadata.create_all)
-        if not IS_SQLITE:
-            await conn.execute(
-                text(
-                    """
-                    DO $$ BEGIN
-                      ALTER TABLE sentiment_history ADD COLUMN IF NOT EXISTS recorded_at TEXT;
-                    EXCEPTION WHEN undefined_table THEN NULL;
-                    END $$
-                    """
-                )
-            )
         await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_voters_name ON voters (first_name, last_name)"))
         await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_voters_category ON voters (gotv_category)"))
         await conn.execute(
@@ -279,10 +356,25 @@ async def init_db() -> None:
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS idx_messages_voter ON generated_messages (voter_id)")
         )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_dossiers_status ON candidate_dossiers (status)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_trends_candidate ON trend_events (candidate_id)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_responses_trend ON strategic_responses (trend_event_id)")
+        )
 
 
 async def resolve_voter(voter_id: str) -> dict[str, Any] | None:
-    return await get_voter(voter_id)
+    row = await get_voter(voter_id)
+    if row:
+        return row
+    async with _session_factory()() as db:
+        stmt = select(voters).where(voters.c.id.like(f"%{voter_id[-8:]}%")).limit(1)
+        found = (await db.execute(stmt)).mappings().first()
+        return dict(found) if found else None
 
 
 async def insert_sentiment_event(
@@ -304,7 +396,7 @@ async def insert_sentiment_event(
                 source=source,
                 delta=delta,
                 neighborhood=neighborhood,
-                recorded_at=timestamp,
+                timestamp=timestamp,
             )
         )
         await db.commit()
@@ -314,8 +406,8 @@ async def list_sentiment_history(voter_id: str, limit: int = 100) -> list[dict[s
     async with _session_factory()() as db:
         stmt = (
             select(sentiment_history)
-            .where(_voter_id_filter(voter_id))
-            .order_by(sentiment_history.c.recorded_at.desc())
+            .where(sentiment_history.c.voter_id == voter_id)
+            .order_by(sentiment_history.c.timestamp.desc())
             .limit(limit)
         )
         rows = (await db.execute(stmt)).mappings().all()
@@ -448,16 +540,13 @@ async def list_voters(
             list_stmt = list_stmt.where(f)
         total = int((await db.execute(count_stmt)).scalar_one())
         rows = (await db.execute(list_stmt)).mappings().all()
-        normalized = [normalize_voter_row(dict(r)) for r in rows]
-        return [r for r in normalized if r], total
+        return [dict(r) for r in rows], total
 
 
 async def get_voter(voter_id: str) -> dict[str, Any] | None:
     async with _session_factory()() as db:
-        row = (
-            await db.execute(select(voters).where(_voter_id_filter(voter_id)).limit(1))
-        ).mappings().first()
-        return normalize_voter_row(dict(row) if row else None)
+        row = (await db.execute(select(voters).where(voters.c.id == voter_id))).mappings().first()
+        return dict(row) if row else None
 
 
 async def find_by_name(first_name: str, last_name: str) -> dict[str, Any] | None:
@@ -472,21 +561,7 @@ async def find_by_name(first_name: str, last_name: str) -> dict[str, Any] | None
                 .limit(1)
             )
         ).mappings().first()
-        return normalize_voter_row(dict(row) if row else None)
-
-
-def _coerce_voter_write_value(key: str, value: Any) -> Any:
-    if key in ("enriched_at", "created_at", "updated_at") and value is not None and not IS_SQLITE:
-        if hasattr(value, "isoformat") and not isinstance(value, str):
-            return value
-        if isinstance(value, str):
-            try:
-                return datetime.fromisoformat(value.replace("Z", "+00:00"))
-            except ValueError:
-                return value
-    if key == "gotv_priority" and value is not None:
-        return int(round(float(value)))
-    return value
+        return dict(row) if row else None
 
 
 async def insert_voter(data: dict[str, Any]) -> dict[str, Any]:
@@ -506,13 +581,9 @@ async def update_voter(voter_id: str, fields: dict[str, Any]) -> dict[str, Any] 
     allowed = {k: v for k, v in fields.items() if k in VOTER_COLUMNS and k != "id" and v is not None}
     if not allowed:
         return await get_voter(voter_id)
-    if IS_SQLITE:
-        allowed["updated_at"] = datetime.now(UTC).isoformat()
-    else:
-        allowed["updated_at"] = datetime.now(UTC)
-    payload = {k: _coerce_voter_write_value(k, v) for k, v in allowed.items()}
+    allowed["updated_at"] = datetime.now(UTC).isoformat()
     async with _session_factory()() as db:
-        await db.execute(voters.update().where(_voter_id_filter(voter_id)).values(**payload))
+        await db.execute(voters.update().where(voters.c.id == voter_id).values(**allowed))
         await db.commit()
     return await get_voter(voter_id)
 
@@ -571,3 +642,279 @@ async def insert_turnout_prediction(data: dict[str, Any]) -> dict[str, Any]:
         await db.execute(turnout_predictions.insert().values(**payload))
         await db.commit()
     return payload
+
+
+def _json_dumps(value: Any) -> str:
+    import json
+
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _json_loads(value: Any, default: Any) -> Any:
+    import json
+
+    if value is None:
+        return default
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value))
+    except Exception:
+        return default
+
+
+def decode_dossier_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not row:
+        return None
+    out = dict(row)
+    for key, default in (
+        ("platform", {}),
+        ("strengths", []),
+        ("weaknesses", []),
+        ("target_demographics", {}),
+        ("opponent_analysis", {}),
+        ("key_messages", []),
+        ("campaign_slogans", []),
+        ("talking_points", {}),
+        ("red_lines", []),
+        ("endorsements", {}),
+    ):
+        out[key] = _json_loads(out.get(key), default)
+    return out
+
+
+async def insert_dossier(data: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now(UTC).isoformat()
+    payload = {
+        "id": data["id"],
+        "candidate_name": data.get("candidate_name") or "מועמד",
+        "party": data.get("party") or "לא צוין",
+        "role": data.get("role") or "",
+        "bio": data.get("bio") or "",
+        "platform": _json_dumps(data.get("platform") or {}),
+        "strengths": _json_dumps(data.get("strengths") or []),
+        "weaknesses": _json_dumps(data.get("weaknesses") or []),
+        "target_demographics": _json_dumps(data.get("target_demographics") or {}),
+        "opponent_analysis": _json_dumps(data.get("opponent_analysis") or {}),
+        "key_messages": _json_dumps(data.get("key_messages") or []),
+        "campaign_strategy": data.get("campaign_strategy") or "",
+        "campaign_slogans": _json_dumps(data.get("campaign_slogans") or []),
+        "talking_points": _json_dumps(data.get("talking_points") or {}),
+        "red_lines": _json_dumps(data.get("red_lines") or []),
+        "endorsements": _json_dumps(data.get("endorsements") or {}),
+        "raw_text": data.get("raw_text") or "",
+        "source_filename": data.get("source_filename") or "",
+        "source_file_type": data.get("source_file_type") or "",
+        "version": int(data.get("version") or 1),
+        "status": data.get("status") or "active",
+        "confidence": float(data.get("confidence") or 0),
+        "created_at": data.get("created_at") or now,
+        "updated_at": data.get("updated_at") or now,
+    }
+    async with _session_factory()() as session:
+        await session.execute(candidate_dossiers.insert().values(**payload))
+        await session.commit()
+    return decode_dossier_row(payload)  # type: ignore[return-value]
+
+
+async def get_dossier(dossier_id: str) -> dict[str, Any] | None:
+    async with _session_factory()() as session:
+        row = (
+            await session.execute(select(candidate_dossiers).where(candidate_dossiers.c.id == dossier_id))
+        ).mappings().first()
+        return decode_dossier_row(dict(row) if row else None)
+
+
+async def list_dossiers(status: str | None = "active") -> list[dict[str, Any]]:
+    async with _session_factory()() as session:
+        stmt = select(candidate_dossiers).order_by(candidate_dossiers.c.updated_at.desc())
+        if status:
+            stmt = stmt.where(candidate_dossiers.c.status == status)
+        rows = (await session.execute(stmt)).mappings().all()
+        return [decode_dossier_row(dict(r)) for r in rows]  # type: ignore[misc]
+
+
+async def update_dossier(dossier_id: str, fields: dict[str, Any]) -> dict[str, Any] | None:
+    existing = await get_dossier(dossier_id)
+    if not existing:
+        return None
+    json_fields = {
+        "platform",
+        "strengths",
+        "weaknesses",
+        "target_demographics",
+        "opponent_analysis",
+        "key_messages",
+        "campaign_slogans",
+        "talking_points",
+        "red_lines",
+        "endorsements",
+    }
+    allowed_keys = set(candidate_dossiers.c.keys()) - {"id", "created_at"}
+    updates: dict[str, Any] = {}
+    for k, v in fields.items():
+        if k not in allowed_keys or v is None:
+            continue
+        updates[k] = _json_dumps(v) if k in json_fields else v
+    updates["version"] = int(existing.get("version") or 1) + 1
+    updates["updated_at"] = datetime.now(UTC).isoformat()
+    async with _session_factory()() as session:
+        await session.execute(
+            candidate_dossiers.update().where(candidate_dossiers.c.id == dossier_id).values(**updates)
+        )
+        await session.commit()
+    return await get_dossier(dossier_id)
+
+
+async def insert_trend_event(data: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now(UTC).isoformat()
+    payload = {
+        "id": data["id"],
+        "title": data["title"],
+        "description": data.get("description") or "",
+        "source_urls": _json_dumps(data.get("source_urls") or []),
+        "platform": data.get("platform") or "",
+        "sentiment": data.get("sentiment") or "NEUTRAL",
+        "classification": data.get("classification") or "NEUTRAL_MENTION",
+        "impact_score": float(data.get("impact_score") or 0),
+        "reach_estimate": int(data.get("reach_estimate") or 0),
+        "related_candidate": data.get("related_candidate") or "",
+        "related_opponent": data.get("related_opponent") or "",
+        "key_narrative": data.get("key_narrative") or "",
+        "detected_at": data.get("detected_at") or now,
+        "tags": _json_dumps(data.get("tags") or []),
+        "status": data.get("status") or "active",
+        "raw_data": data.get("raw_data") or "",
+        "candidate_id": data.get("candidate_id") or "",
+    }
+    async with _session_factory()() as session:
+        await session.execute(trend_events.insert().values(**payload))
+        await session.commit()
+    out = dict(payload)
+    out["source_urls"] = _json_loads(out["source_urls"], [])
+    out["tags"] = _json_loads(out["tags"], [])
+    return out
+
+
+async def get_trend_event(trend_id: str) -> dict[str, Any] | None:
+    async with _session_factory()() as session:
+        row = (
+            await session.execute(select(trend_events).where(trend_events.c.id == trend_id))
+        ).mappings().first()
+        if not row:
+            return None
+        out = dict(row)
+        out["source_urls"] = _json_loads(out.get("source_urls"), [])
+        out["tags"] = _json_loads(out.get("tags"), [])
+        return out
+
+
+async def list_trend_events(
+    *,
+    candidate_id: str | None = None,
+    classification: str | None = None,
+    hours: int | None = None,
+    days: int | None = None,
+) -> list[dict[str, Any]]:
+    async with _session_factory()() as session:
+        stmt = select(trend_events).order_by(trend_events.c.detected_at.desc())
+        if candidate_id:
+            stmt = stmt.where(trend_events.c.candidate_id == candidate_id)
+        if classification:
+            stmt = stmt.where(trend_events.c.classification == classification)
+        rows = (await session.execute(stmt)).mappings().all()
+        results = []
+        for r in rows:
+            out = dict(r)
+            out["source_urls"] = _json_loads(out.get("source_urls"), [])
+            out["tags"] = _json_loads(out.get("tags"), [])
+            results.append(out)
+        if hours or days:
+            from datetime import timedelta
+
+            cutoff = datetime.now(UTC) - timedelta(hours=hours or 0, days=days or 0)
+            filtered = []
+            for item in results:
+                try:
+                    ts = datetime.fromisoformat(str(item.get("detected_at") or "").replace("Z", "+00:00"))
+                    if ts.tzinfo is None:
+                        ts = ts.replace(tzinfo=UTC)
+                    if ts >= cutoff:
+                        filtered.append(item)
+                except Exception:
+                    filtered.append(item)
+            return filtered
+        return results
+
+
+async def insert_strategic_response(data: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now(UTC).isoformat()
+    payload = {
+        "id": data["id"],
+        "trend_event_id": data["trend_event_id"],
+        "response_type": data["response_type"],
+        "target_audience": data.get("target_audience") or "",
+        "gotv_category": data.get("gotv_category") or "",
+        "headline": data["headline"],
+        "full_text": data["full_text"],
+        "talking_point_used": data.get("talking_point_used") or "",
+        "counter_narrative": data.get("counter_narrative") or "",
+        "expected_impact": float(data.get("expected_impact") or 0),
+        "risk_level": float(data.get("risk_level") or 0),
+        "channels": _json_dumps(data.get("channels") or []),
+        "voter_segment": _json_dumps(data.get("voter_segment") or {}),
+        "gotv_variants": _json_dumps(data.get("gotv_variants") or {}),
+        "generated_at": data.get("generated_at") or now,
+        "approved": 1 if data.get("approved") else 0,
+    }
+    async with _session_factory()() as session:
+        await session.execute(strategic_responses.insert().values(**payload))
+        await session.commit()
+    out = dict(payload)
+    out["channels"] = _json_loads(out["channels"], [])
+    out["voter_segment"] = _json_loads(out["voter_segment"], {})
+    out["gotv_variants"] = _json_loads(out["gotv_variants"], {})
+    out["approved"] = bool(out["approved"])
+    return out
+
+
+async def list_strategic_responses(trend_event_id: str) -> list[dict[str, Any]]:
+    async with _session_factory()() as session:
+        rows = (
+            await session.execute(
+                select(strategic_responses)
+                .where(strategic_responses.c.trend_event_id == trend_event_id)
+                .order_by(strategic_responses.c.generated_at.desc())
+            )
+        ).mappings().all()
+        results = []
+        for r in rows:
+            out = dict(r)
+            out["channels"] = _json_loads(out.get("channels"), [])
+            out["voter_segment"] = _json_loads(out.get("voter_segment"), {})
+            out["gotv_variants"] = _json_loads(out.get("gotv_variants"), {})
+            out["approved"] = bool(out.get("approved"))
+            results.append(out)
+        return results
+
+
+async def insert_trend_alert_subscription(data: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now(UTC).isoformat()
+    payload = {
+        "id": data["id"],
+        "candidate_id": data.get("candidate_id") or "",
+        "alert_types": _json_dumps(data.get("alert_types") or []),
+        "min_impact": float(data.get("min_impact") or 0.6),
+        "webhook_url": data.get("webhook_url") or "",
+        "email": data.get("email") or "",
+        "status": data.get("status") or "active",
+        "created_at": now,
+    }
+    async with _session_factory()() as session:
+        await session.execute(trend_alert_subscriptions.insert().values(**payload))
+        await session.commit()
+    out = dict(payload)
+    out["alert_types"] = _json_loads(out["alert_types"], [])
+    return out

@@ -591,6 +591,119 @@ if code_feat_probe == 200:
         timeline = trend.get("timeline") or []
         test("Sentiment trend ~30 days", len(timeline) >= 25, f"points={len(timeline)}")
 
+# ─── 15. FEATURES 7–8 (psycho + writer) ───
+print()
+print("── 15. FEATURES 7–8 (API) ──")
+code_psycho_probe, _ = api_post("/api/intel/psycho/profile", {"voter_id": sample_voter_id or "1"})
+test(
+    "Features 7–8 deployed (POST /api/intel/psycho/profile)",
+    code_psycho_probe in (200, 404),
+    f"Got {code_psycho_probe}",
+)
+
+if sample_voter_id:
+    code, psycho = api_post("/api/intel/psycho/profile", {"voter_id": sample_voter_id})
+    test("POST /api/intel/psycho/profile returns 200", code == 200, f"Got {code}: {psycho}")
+    if code == 200:
+        prof = psycho.get("profile") or {}
+        test("Psycho has socio_economic", "socio_economic" in prof)
+        test("Psycho has personality", "personality" in prof)
+        test("Psycho has persuasion", "persuasion" in prof)
+        test("Psycho has loyalty", "loyalty" in prof)
+        test("Psycho has recommended_approach", "recommended_approach" in prof)
+        tier = int((prof.get("socio_economic") or {}).get("tier") or 0)
+        test("socio_economic_tier 1–10", 1 <= tier <= 10, f"tier={tier}")
+        bf = ((prof.get("personality") or {}).get("big_five") or {})
+        for trait in ("openness", "conscientiousness", "extraversion", "agreeableness", "neuroticism"):
+            val = float(bf.get(trait) or -1)
+            test(f"Big Five {trait} in 0–1", 0.0 <= val <= 1.0, f"{trait}={val}")
+        test("Psycho confidence > 0.5", float(psycho.get("confidence") or 0) > 0.5, f"conf={psycho.get('confidence')}")
+        loy = float((prof.get("loyalty") or {}).get("loyalty_score") or -1)
+        vol = float((prof.get("loyalty") or {}).get("volatility_score") or -1)
+        inf = float((prof.get("loyalty") or {}).get("influenceability_score") or -1)
+        test("loyalty_score 0–1", 0.0 <= loy <= 1.0, f"loyalty={loy}")
+        test("volatility_score 0–1", 0.0 <= vol <= 1.0, f"volatility={vol}")
+        test("influenceability_score 0–1", 0.0 <= inf <= 1.0, f"influenceability={inf}")
+
+        code, got = api_get(f"/api/intel/psycho/profile/{urllib.parse.quote(sample_voter_id)}")
+        test("GET /api/intel/psycho/profile/{id} returns 200", code == 200, f"Got {code}")
+
+    code, missing = api_get("/api/intel/psycho/profile/NONEXISTENT-PSYCHO-999")
+    test("GET psycho missing profile → 404", code == 404, f"Got {code}")
+
+    code, bad = api_post("/api/intel/psycho/profile", {"voter_id": "NONEXISTENT-PT-99999"})
+    test("POST psycho unknown voter → 404", code == 404, f"Got {code}")
+
+    if sample_ids:
+        code, batch = api_post(
+            "/api/intel/psycho/batch-profile",
+            {"voter_ids": sample_ids, "max_count": 5},
+        )
+        test("POST /api/intel/psycho/batch-profile returns 200", code == 200, f"Got {code}")
+        test("Batch profiled >= 1", int(batch.get("profiled") or 0) >= 1, f"profiled={batch.get('profiled')}")
+
+    code, insights = api_get("/api/intel/psycho/insights?neighborhood=all")
+    test("GET /api/intel/psycho/insights returns 200", code == 200, f"Got {code}")
+    test("Insights has overall", isinstance(insights.get("overall"), dict))
+
+    code, segs = api_post(
+        "/api/intel/psycho/segments",
+        {"criteria": {"gotv": "SWING", "loyalty_max": 0.9, "neighborhood": "all"}},
+    )
+    test("POST /api/intel/psycho/segments returns 200", code == 200, f"Got {code}")
+    test("Segments has segment_size", "segment_size" in segs)
+
+    # Feature 8 — Writer
+    code, writer = api_post(
+        "/api/intel/writer/generate",
+        {"voter_id": sample_voter_id, "campaign_topic": "חינוך", "formats": ["all"]},
+    )
+    test("POST /api/intel/writer/generate returns 200", code == 200, f"Got {code}: {writer}")
+    if code == 200:
+        formats = writer.get("formats") or {}
+        for fmt in ("private_message", "general_message", "social_post_fb", "social_post_x"):
+            test(f"Writer format present: {fmt}", fmt in formats, f"Keys: {list(formats.keys())}")
+            text = str((formats.get(fmt) or {}).get("text") or "")
+            test(f"Writer {fmt} Hebrew", has_hebrew(text))
+            score = float((formats.get(fmt) or {}).get("engagement_score") or 0)
+            test(f"Writer {fmt} engagement > 0.50", score > 0.50, f"score={score}")
+        x_text = str((formats.get("social_post_x") or {}).get("text") or "")
+        test("social_post_x < 280 chars", len(x_text) <= 280, f"len={len(x_text)}")
+        private = str((formats.get("private_message") or {}).get("text") or "")
+        test(
+            "private_message personalized",
+            bool(writer.get("full_name", "").split()[0] in private or writer.get("neighborhood", "") in private),
+            "name/neighborhood missing",
+        )
+        lever = str((formats.get("private_message") or {}).get("persuasion_lever_used") or "")
+        primary = str((writer.get("psychological_profile") or {}).get("primary_lever") or "")
+        test(
+            "persuasion_lever matches profile",
+            not primary or lever == primary or primary in lever or lever in primary,
+            f"lever={lever} primary={primary}",
+        )
+
+    code, wbatch = api_post(
+        "/api/intel/writer/batch-generate",
+        {"voter_ids": sample_ids[:3] or [sample_voter_id], "campaign_topic": "חינוך", "max_count": 3},
+    )
+    test("POST /api/intel/writer/batch-generate returns 200", code == 200, f"Got {code}")
+    test("Writer batch generated >= 1", int(wbatch.get("generated") or 0) >= 1)
+
+    code, whist = api_get(f"/api/intel/writer/history/{urllib.parse.quote(sample_voter_id)}")
+    test("GET /api/intel/writer/history returns 200", code == 200, f"Got {code}")
+    test("Writer history is list", isinstance(whist.get("history"), list))
+
+    code, cmp = api_post("/api/intel/writer/compare", {"voter_id": sample_voter_id})
+    test("POST /api/intel/writer/compare returns 200", code == 200, f"Got {code}")
+    test("Compare has 4 formats", len((cmp.get("formats") or {})) >= 4)
+
+    export_url = wbatch.get("export_json_url") or ""
+    if export_url:
+        code, exported = api_get(export_url)
+        test("GET writer export returns 200", code == 200, f"Got {code}")
+        test("Export has by_format", isinstance(exported.get("by_format"), dict))
+
 # ─── 14. FEATURE PAGES (FRONTEND) ───
 print()
 print("── 14. FEATURE PAGES (FRONTEND) ──")
@@ -606,6 +719,7 @@ if code_wr_page == 200:
         ("/messages", "מסרים"),
         ("/influence", "השפעה"),
         ("/sentiment", "סנטימנט"),
+        ("/writer", "כותב"),
     ):
         code, page = html_get(f"{FRONTEND}{path}")
         test(f"Frontend {path} returns 200", code == 200, f"Got {code}")
