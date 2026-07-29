@@ -18,7 +18,6 @@ from sqlalchemy import (
     Text,
     cast,
     func,
-    or_,
     select,
     text,
 )
@@ -228,11 +227,9 @@ def normalize_voter_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
 
 def _voter_id_filter(voter_id: str):
     vid = str(voter_id).strip()
-    if not vid:
-        return voters.c.id == vid
     if IS_SQLITE:
         return voters.c.id == vid
-    return or_(voters.c.id == vid, cast(voters.c.id, String) == vid)
+    return cast(voters.c.id, String) == vid
 
 
 _engine: AsyncEngine | None = None
