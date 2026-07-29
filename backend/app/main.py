@@ -165,7 +165,24 @@ async def health() -> HealthResponse:
             service="blackopps",
             version="5.0.0",
             auth_configured=auth.is_configured,
-            modules=["gotv", "scoring", "pipeline", "opposition", "pdf", "collectors"],
+            modules=[
+                "gotv",
+                "scoring",
+                "pipeline",
+                "opposition",
+                "pdf",
+                "collectors",
+                "messaging",
+                "influence",
+                "sentiment_tracker",
+                "war_room",
+                "whatsapp_writer",
+                "prediction_engine",
+                "psychological_profiler",
+                "message_writer",
+                "dossier_manager",
+                "trend_intel",
+            ],
         )
     except Exception:
         logger.error(traceback.format_exc())
@@ -177,7 +194,23 @@ async def list_agents() -> AgentsResponse:
     try:
         return AgentsResponse(
             agents=[AgentInfo(id="blackopps-intel", type="osint", status="active")],
-            modules=["gotv", "pipeline", "opposition", "pdf", "dispatch"],
+            modules=[
+                "gotv",
+                "pipeline",
+                "opposition",
+                "pdf",
+                "dispatch",
+                "messaging",
+                "influence",
+                "sentiment_tracker",
+                "war_room",
+                "whatsapp_writer",
+                "prediction_engine",
+                "psychological_profiler",
+                "message_writer",
+                "dossier_manager",
+                "trend_intel",
+            ],
         )
     except Exception:
         logger.error(traceback.format_exc())

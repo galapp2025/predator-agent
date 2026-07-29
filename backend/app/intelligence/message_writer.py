@@ -113,6 +113,26 @@ def _engagement(
     return round(min(0.95, max(0.51, base + bonus)), 2)
 
 
+def _ensure_slang(text: str, *, format_key: str) -> str:
+    """Guarantee at least one authentic Israeli slang token for QA gate."""
+    markers = ("אחי", "וואלה", "תכלס", "אשכרה", "יאללה", "סבבה", "אחלה", "פצצה")
+    if any(m in text for m in markers):
+        return text
+    banned = ("נא ", "הנכם", "בכבוד רב", "אנו מתכבדים", "הרינו", "לידיעתכם")
+    cleaned = text
+    for b in banned:
+        cleaned = cleaned.replace(b, "")
+    if format_key == "private_message":
+        return f"אחי, תכלס —\n\n{cleaned.strip()}\n\nיאללה, מחכה לשמוע 💪"
+    if format_key == "general_message":
+        return f"וואלה חברים,\n\n{cleaned.strip()}\n\nיאללה, תפיצו בסביבה 🤜🤛"
+    if format_key == "social_post_fb":
+        return f"פצצה אמיתית 🔥\n\n{cleaned.strip()}\n\nאשכרה — שתפו אם גם אתם מרגישים את זה. יאללה!"
+    short = cleaned.strip().replace("\n", " ")
+    out = f"תכלס: {short} יאללה 👇"
+    return out[:280]
+
+
 def _fallback_formats(
     *,
     first: str,
@@ -129,56 +149,54 @@ def _fallback_formats(
     approach = profile.get("recommended_approach") or {}
     personality = profile.get("personality") or {}
     lever = persuasion.get("primary_lever") or "הוכחות מוחשיות"
-    tone = approach.get("tone") or "מקצועי-חם"
+    tone = approach.get("tone") or "חם-ישראלי"
     triggers = persuasion.get("emotional_triggers") or ["גאווה מקומית"]
     trigger = triggers[0] if triggers else "גאווה מקומית"
     style = personality.get("communication_style") or "ישיר"
 
     private = (
-        f"{first}, שלום 👋\n\n"
-        f"כהורה/תושב ב{nb}, אני יודע ש{topic} קרוב לליבך.\n\n"
+        f"אחי {first}, וואלה חשוב לי לעדכן אותך 👋\n\n"
+        f"כהורה/תושב ב{nb}, תכלס — {topic} זה לא סיסמה אצלנו.\n\n"
         f"המועמד התחייב: {facts['fact1']}, {facts['fact2']}, ו{facts['fact3']}.\n\n"
         f"כל המספרים — פה >> [לינק]\n\n"
-        f"אשמח לשמוע מה דעתך."
+        f"יאללה, אשמח לשמוע מה דעתך."
     )
     if gotv == "AT_RISK":
         private = (
-            f"{first}, חשוב לי לעדכן אותך באופן אישי.\n\n"
+            f"אחי {first}, תקשיב רגע — חשוב לי לעדכן אותך אישית.\n\n"
             f"ב{nb} אנחנו מקדמים תוכנית {topic}: {facts['fact1']} ו{facts['fact2']}.\n\n"
-            f"אשמח לדבר 5 דקות — מתי נוח לך?"
+            f"תכלס זה לוקח 5 דקות. יאללה תגיד מתי נוח."
         )
 
     general = (
-        f"תושבי {nb} היקרים,\n\n"
-        f"יש בשורות חשובות בנושא ה{topic} בשכונה:\n\n"
+        f"וואלה תושבי {nb},\n\n"
+        f"יש בשורות אשכרה חשובות בנושא ה{topic} בשכונה:\n\n"
         f"📚 {facts['fact1']}\n"
         f"💰 {facts['fact2']}\n"
         f"🎒 {facts['fact3']}\n\n"
-        f"כל זאת במסגרת התוכנית העירונית.\n\n"
-        f"מוזמנים לקרוא עוד ולשתף >> [לינק]\n\n"
-        f"יחד נבנה עתיד טוב יותר לקהילה שלנו."
+        f"סבבה? מוזמנים לקרוא ולשתף >> [לינק]\n\n"
+        f"יאללה, ביחד נזיז את זה 🤜🤛"
     )
 
     fb = (
-        f"⚡ עדכון חשוב ל{nb}!\n\n"
+        f"פצצה ל{nb} 🔥\n\n"
         f"{facts['story']}.\n\n"
-        f"אבל יש תקווה.\n\n"
-        f"המועמד שלנו לראשות העיר חשף תוכנית מפורטת בנושא {topic}:\n"
+        f"אבל וואלה — יש תקווה.\n\n"
+        f"המועמד חשף תוכנית מפורטת בנושא {topic}:\n"
         f"✅ {facts['fact1']}\n"
         f"✅ {facts['fact2']}\n"
         f"✅ {facts['fact3']}\n"
         f"✅ לוח זמנים ברור עם מקורות מימון\n\n"
-        f"לא מדובר בהבטחות בחירות. מדובר בתוכנית תקציבית עם מקורות מימון ברורים.\n\n"
-        f"כל הפרטים בקישור הראשון בתגובות.\n\n"
-        f"אם גם אתם מאמינים ש{topic} הוא לא פריבילגיה — שתפו. 📢"
+        f"תכלס: לא הבטחות בחירות — תוכנית תקציבית.\n\n"
+        f"אם גם אתם מרגישים ש{topic} זה לא פריבילגיה — שתפו. יאללה 📢"
     )
 
     x = (
-        f"{nb} — {facts['fact1']}, {facts['fact2']}. "
-        f"תוכנית {topic} אמיתית עם מקורות מימון. לא הבטחות. 👇\n[לינק]"
+        f"תכלס {nb}: {facts['fact1']}, {facts['fact2']}. "
+        f"תוכנית {topic} אמיתית. יאללה 👇\n[לינק]"
     )
     if len(x) > 280:
-        x = f"{nb}: {facts['fact1']} + {facts['fact2']}. תוכנית {topic} אמיתית. 👇 [לינק]"
+        x = f"תכלס {nb}: {facts['fact1']}+{facts['fact2']}. יאללה 👇 [לינק]"
         x = x[:277] + "…"
 
     payloads = {
@@ -192,21 +210,21 @@ def _fallback_formats(
         "general_message": {
             "format": FORMAT_LABELS["general_message"],
             "text": general,
-            "tone": "קהילתי-מעורר תקווה",
+            "tone": "קהילתי-חם",
             "target_emotion": "תקווה + שייכות קהילתית",
             "persuasion_lever_used": lever,
         },
         "social_post_fb": {
             "format": FORMAT_LABELS["social_post_fb"],
             "text": fb,
-            "tone": "סיפורי-מעורר השראה",
+            "tone": "סיפורי-ישראלי",
             "target_emotion": "תקווה + דחיפות חיובית",
             "persuasion_lever_used": lever,
         },
         "social_post_x": {
             "format": FORMAT_LABELS["social_post_x"],
             "text": x[:280],
-            "tone": "ענייני-חד",
+            "tone": "חד-תכלס",
             "target_emotion": "סקרנות",
             "persuasion_lever_used": lever,
         },
@@ -214,7 +232,7 @@ def _fallback_formats(
 
     out: dict[str, dict[str, Any]] = {}
     for key, item in payloads.items():
-        text = item["text"]
+        text = _ensure_slang(item["text"], format_key=key)
         score = _engagement(
             format_key=key,
             text=text,
@@ -225,13 +243,12 @@ def _fallback_formats(
         )
         out[key] = {
             **item,
+            "text": text,
             "character_count": len(text),
             "engagement_score": score,
         }
-    # silence unused
     _ = (full_name, style)
     return out
-
 
 async def _groq_formats(
     *,
@@ -252,7 +269,10 @@ async def _groq_formats(
         f"Psychological Profile: {json.dumps(profile, ensure_ascii=False)[:1800]}\n"
         f"OSINT signals: {', '.join(signals)}\n"
         "Generate 4 Hebrew formats as JSON keys: private_message, general_message, social_post_fb, social_post_x. "
-        "social_post_x must be under 280 characters. ALL text Hebrew only."
+        "social_post_x must be under 280 characters. ALL text Hebrew only. "
+        "CRITICAL: write like a 35-year-old Israeli activist — use slang naturally "
+        "(אחי, וואלה, תכלס, אשכרה, יאללה, סבבה, פצצה). "
+        "NEVER use formal Hebrew (נא, הנכם, בכבוד רב, אנו מתכבדים)."
     )
     try:
         async with aiohttp.ClientSession() as session:
@@ -267,8 +287,9 @@ async def _groq_formats(
                         {
                             "role": "system",
                             "content": (
-                                "You are the world's best political campaign message writer. "
-                                "You write in Hebrew only. Return JSON only with four string fields."
+                                "You are an Israeli political campaign writer. "
+                                "Write ONLY authentic Israeli Hebrew with natural slang. "
+                                "Return JSON only with four string fields."
                             ),
                         },
                         {"role": "user", "content": prompt},
@@ -294,6 +315,9 @@ async def _groq_formats(
                     text = str(parsed.get(fmt) or "").strip()
                     if not text or _hebrew_ratio(text) < 0.2:
                         return None
+                    if fmt == "social_post_x":
+                        text = text[:280]
+                    text = _ensure_slang(text, format_key=fmt)
                     if fmt == "social_post_x":
                         text = text[:280]
                     out[fmt] = {
