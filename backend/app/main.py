@@ -29,6 +29,7 @@ from app.intelligence.dossier_manager import router as dossier_router
 from app.intelligence.trend_intel import router as trend_router
 from app.intelligence.psychological_profiler import router as psycho_router
 from app.intelligence.message_writer import router as writer_router
+from app.intelligence.voter_intel_deep import router as voter_intel_deep_router
 from app.schemas import (
     AgentsResponse,
     AgentInfo,
@@ -102,6 +103,7 @@ app.include_router(dossier_router, prefix="/api")
 app.include_router(trend_router, prefix="/api")
 app.include_router(psycho_router, prefix="/api")
 app.include_router(writer_router, prefix="/api")
+app.include_router(voter_intel_deep_router, prefix="/api")
 
 
 @app.middleware("http")
@@ -182,6 +184,7 @@ async def health() -> HealthResponse:
                 "message_writer",
                 "dossier_manager",
                 "trend_intel",
+                "voter_intel_deep",
             ],
         )
     except Exception:
@@ -210,6 +213,7 @@ async def list_agents() -> AgentsResponse:
                 "message_writer",
                 "dossier_manager",
                 "trend_intel",
+                "voter_intel_deep",
             ],
         )
     except Exception:

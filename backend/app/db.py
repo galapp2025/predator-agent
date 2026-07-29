@@ -188,6 +188,23 @@ psychological_profiles = Table(
     Column("profile_json", Text, default=""),
 )
 
+voter_intel_deep = Table(
+    "voter_intel_deep",
+    metadata,
+    Column("id", String(64), primary_key=True),
+    Column("voter_id", String(64), nullable=False, unique=True),
+    Column("social_presence", Text, default=""),
+    Column("topic_stances", Text, default=""),
+    Column("behavioral_patterns", Text, default=""),
+    Column("social_network", Text, default=""),
+    Column("communication_profile", Text, default=""),
+    Column("triggers", Text, default=""),
+    Column("intelligence_score", Float, default=0.0),
+    Column("last_updated", Text, nullable=True),
+    Column("osint_raw", Text, default=""),
+    Column("intel_json", Text, default=""),
+)
+
 generated_content = Table(
     "generated_content",
     metadata,
@@ -428,6 +445,9 @@ async def init_db() -> None:
         )
         await conn.execute(
             text("CREATE INDEX IF NOT EXISTS idx_responses_trend ON strategic_responses (trend_event_id)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_voter_intel_deep_voter ON voter_intel_deep (voter_id)")
         )
 
 
@@ -1111,4 +1131,62 @@ async def list_generated_content_by_campaign(campaign_id: str) -> list[dict[str,
                 .order_by(generated_content.c.created_at.desc())
             )
         ).mappings().all()
+        return [dict(r) for r in rows]
+
+
+async def upsert_voter_intel_deep(data: dict[str, Any]) -> dict[str, Any]:
+    now = datetime.now(UTC).isoformat()
+    payload = {
+        "id": data.get("id") or "",
+        "voter_id": str(data["voter_id"]),
+        "social_presence": data.get("social_presence", ""),
+        "topic_stances": data.get("topic_stances", ""),
+        "behavioral_patterns": data.get("behavioral_patterns", ""),
+        "social_network": data.get("social_network", ""),
+        "communication_profile": data.get("communication_profile", ""),
+        "triggers": data.get("triggers", ""),
+        "intelligence_score": float(data.get("intelligence_score") or 0),
+        "last_updated": data.get("last_updated") or now,
+        "osint_raw": data.get("osint_raw", ""),
+        "intel_json": data.get("intel_json", ""),
+    }
+    async with _session_factory()() as db:
+        existing = (
+            await db.execute(
+                select(voter_intel_deep)
+                .where(voter_intel_deep.c.voter_id == payload["voter_id"])
+                .limit(1)
+            )
+        ).mappings().first()
+        if existing:
+            payload["id"] = existing["id"]
+            update_fields = {k: v for k, v in payload.items() if k != "id"}
+            await db.execute(
+                voter_intel_deep.update()
+                .where(voter_intel_deep.c.id == existing["id"])
+                .values(**update_fields)
+            )
+        else:
+            if not payload["id"]:
+                payload["id"] = f"vid-{payload['voter_id']}"
+            await db.execute(voter_intel_deep.insert().values(**payload))
+        await db.commit()
+    return payload
+
+
+async def get_voter_intel_deep(voter_id: str) -> dict[str, Any] | None:
+    async with _session_factory()() as db:
+        row = (
+            await db.execute(
+                select(voter_intel_deep)
+                .where(voter_intel_deep.c.voter_id == str(voter_id))
+                .limit(1)
+            )
+        ).mappings().first()
+        return dict(row) if row else None
+
+
+async def list_voter_intel_deep(*, limit: int = 5000) -> list[dict[str, Any]]:
+    async with _session_factory()() as db:
+        rows = (await db.execute(select(voter_intel_deep).limit(limit))).mappings().all()
         return [dict(r) for r in rows]
