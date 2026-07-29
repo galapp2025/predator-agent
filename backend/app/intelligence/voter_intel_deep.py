@@ -112,7 +112,7 @@ def _fallback_intel(voter: dict[str, Any], *, low_osint: bool = True) -> dict[st
     gotv = _gotv(voter)
     first = voter.get("first_name") or name.split()[0]
 
-    conf = 42 if low_osint else 58
+    conf = 52 if low_osint else 68
     return {
         "social_presence": {
             "primary_platforms": [
@@ -273,7 +273,7 @@ def _normalize_intel(raw: dict[str, Any], voter: dict[str, Any]) -> dict[str, An
         score = float(ia.get("confidence_score") or 0)
     except (TypeError, ValueError):
         score = 55
-    ia["confidence_score"] = int(max(35, min(95, score)))
+    ia["confidence_score"] = int(max(50, min(95, score)))
     if not isinstance(ia.get("intelligence_gaps"), list) or not ia["intelligence_gaps"]:
         ia["intelligence_gaps"] = base["intelligence_assessment"]["intelligence_gaps"]
 
