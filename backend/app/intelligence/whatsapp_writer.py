@@ -359,7 +359,7 @@ async def build_message_package(
 
 @router.post("/generate")
 async def generate_whatsapp(payload: GenerateRequest) -> dict[str, Any]:
-    voter = await db.get_voter(payload.voter_id)
+    voter = await db.resolve_voter(payload.voter_id)
     if not voter:
         raise HTTPException(status_code=404, detail=f"Voter '{payload.voter_id}' not found")
     return await build_message_package(
@@ -425,7 +425,7 @@ async def whatsapp_history(voter_id: str) -> dict[str, Any]:
 
 @router.post("/schedule")
 async def schedule_whatsapp(payload: ScheduleRequest) -> dict[str, Any]:
-    voter = await db.get_voter(payload.voter_id)
+    voter = await db.resolve_voter(payload.voter_id)
     if not voter:
         raise HTTPException(status_code=404, detail=f"Voter '{payload.voter_id}' not found")
     schedule_id = str(uuid.uuid4())

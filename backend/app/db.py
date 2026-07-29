@@ -16,7 +16,9 @@ from sqlalchemy import (
     String,
     Table,
     Text,
+    cast,
     func,
+    or_,
     select,
     text,
 )
@@ -179,6 +181,60 @@ VOTER_COLUMNS = (
     "updated_at",
 )
 
+
+def normalize_voter_row(row: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Coerce Postgres/SQLite row shapes into API-friendly types."""
+    if not row:
+        return None
+    out = dict(row)
+    if out.get("id") is not None:
+        out["id"] = str(out["id"])
+    for key in ("first_name", "last_name", "city", "neighborhood", "phone", "email"):
+        if out.get(key) is None:
+            out[key] = ""
+        else:
+            out[key] = str(out[key])
+    for key in ("gotv_category", "gotv_channel", "gotv_frequency"):
+        if out.get(key) is None:
+            out[key] = ""
+        else:
+            out[key] = str(out[key])
+    if out.get("gotv_message") is None:
+        out["gotv_message"] = ""
+    else:
+        out["gotv_message"] = str(out["gotv_message"])
+    try:
+        out["support_score"] = float(out.get("support_score") or 0.5)
+    except (TypeError, ValueError):
+        out["support_score"] = 0.5
+    try:
+        out["turnout_history"] = float(out.get("turnout_history") or 0.0)
+    except (TypeError, ValueError):
+        out["turnout_history"] = 0.0
+    try:
+        out["gotv_priority"] = int(round(float(out.get("gotv_priority") or 0)))
+    except (TypeError, ValueError):
+        out["gotv_priority"] = 0
+    for ts_key in ("enriched_at", "created_at", "updated_at"):
+        val = out.get(ts_key)
+        if val is None:
+            out[ts_key] = None
+        elif hasattr(val, "isoformat"):
+            out[ts_key] = val.isoformat()
+        else:
+            out[ts_key] = str(val)
+    return out
+
+
+def _voter_id_filter(voter_id: str):
+    vid = str(voter_id).strip()
+    if not vid:
+        return voters.c.id == vid
+    if IS_SQLITE:
+        return voters.c.id == vid
+    return or_(voters.c.id == vid, cast(voters.c.id, String) == vid)
+
+
 _engine: AsyncEngine | None = None
 _Session: async_sessionmaker[AsyncSession] | None = None
 
@@ -218,13 +274,7 @@ async def init_db() -> None:
 
 
 async def resolve_voter(voter_id: str) -> dict[str, Any] | None:
-    row = await get_voter(voter_id)
-    if row:
-        return row
-    async with _session_factory()() as db:
-        stmt = select(voters).where(voters.c.id.like(f"%{voter_id[-8:]}%")).limit(1)
-        found = (await db.execute(stmt)).mappings().first()
-        return dict(found) if found else None
+    return await get_voter(voter_id)
 
 
 async def insert_sentiment_event(
@@ -390,13 +440,16 @@ async def list_voters(
             list_stmt = list_stmt.where(f)
         total = int((await db.execute(count_stmt)).scalar_one())
         rows = (await db.execute(list_stmt)).mappings().all()
-        return [dict(r) for r in rows], total
+        normalized = [normalize_voter_row(dict(r)) for r in rows]
+        return [r for r in normalized if r], total
 
 
 async def get_voter(voter_id: str) -> dict[str, Any] | None:
     async with _session_factory()() as db:
-        row = (await db.execute(select(voters).where(voters.c.id == voter_id))).mappings().first()
-        return dict(row) if row else None
+        row = (
+            await db.execute(select(voters).where(_voter_id_filter(voter_id)).limit(1))
+        ).mappings().first()
+        return normalize_voter_row(dict(row) if row else None)
 
 
 async def find_by_name(first_name: str, last_name: str) -> dict[str, Any] | None:
@@ -411,7 +464,19 @@ async def find_by_name(first_name: str, last_name: str) -> dict[str, Any] | None
                 .limit(1)
             )
         ).mappings().first()
-        return dict(row) if row else None
+        return normalize_voter_row(dict(row) if row else None)
+
+
+def _coerce_voter_write_value(key: str, value: Any) -> Any:
+    if key in ("enriched_at", "created_at", "updated_at") and value is not None and not IS_SQLITE:
+        if isinstance(value, str):
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return value
+    if key == "gotv_priority" and value is not None:
+        return int(round(float(value)))
+    return value
 
 
 async def insert_voter(data: dict[str, Any]) -> dict[str, Any]:
@@ -432,8 +497,9 @@ async def update_voter(voter_id: str, fields: dict[str, Any]) -> dict[str, Any] 
     if not allowed:
         return await get_voter(voter_id)
     allowed["updated_at"] = datetime.now(UTC).isoformat()
+    payload = {k: _coerce_voter_write_value(k, v) for k, v in allowed.items()}
     async with _session_factory()() as db:
-        await db.execute(voters.update().where(voters.c.id == voter_id).values(**allowed))
+        await db.execute(voters.update().where(_voter_id_filter(voter_id)).values(**payload))
         await db.commit()
     return await get_voter(voter_id)
 

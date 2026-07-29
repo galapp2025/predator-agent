@@ -145,7 +145,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 
 def _voter_out(row: dict[str, Any]) -> VoterOut:
-    return VoterOut.model_validate(row)
+    normalized = db.normalize_voter_row(row) or row
+    return VoterOut.model_validate(normalized)
 
 
 @app.get("/health", response_model=HealthResponse)

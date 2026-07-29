@@ -582,8 +582,8 @@ def enqueue_dispatch(
     voter_name: str | None,
     channel: str,
     priority: int,
-    message: str,
-    message_template: str | None,
+    message: str = "",
+    message_template: str | None = None,
     custom_message: str | None = None,
 ) -> dict[str, Any]:
     template_key = (message_template or "civic_duty").strip()

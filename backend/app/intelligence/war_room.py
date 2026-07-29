@@ -175,6 +175,7 @@ async def emergency_dispatch(body: EmergencyDispatchRequest) -> dict[str, Any]:
             voter_name=name,
             channel=r.get("gotv_channel") or "whatsapp",
             priority=int(float(r.get("gotv_priority") or 80)),
+            message="",
             message_template="civic_duty",
         )
         tasks.append(rec["task_id"])
