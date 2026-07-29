@@ -25,6 +25,8 @@ from app.intelligence.influence import router as influence_router
 from app.intelligence.messaging import router as messaging_router
 from app.intelligence.sentiment_tracker import router as sentiment_router
 from app.intelligence.war_room import router as war_room_router
+from app.intelligence.dossier_manager import router as dossier_router
+from app.intelligence.trend_intel import router as trend_router
 from app.intelligence.psychological_profiler import router as psycho_router
 from app.intelligence.message_writer import router as writer_router
 from app.schemas import (
@@ -96,6 +98,8 @@ app.include_router(sentiment_router, prefix="/api")
 app.include_router(influence_router, prefix="/api")
 app.include_router(whatsapp_router, prefix="/api")
 app.include_router(prediction_router, prefix="/api")
+app.include_router(dossier_router, prefix="/api")
+app.include_router(trend_router, prefix="/api")
 app.include_router(psycho_router, prefix="/api")
 app.include_router(writer_router, prefix="/api")
 
